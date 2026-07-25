@@ -277,13 +277,19 @@
       color: var(--neg);
     }
 
+    #sweep-charts-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 12px;
+    }
+
     .chart-box {
       background: var(--panel);
       border: 1px solid var(--border);
       border-radius: 8px;
       padding: 10px;
       margin-bottom: 16px;
-      height: 320px;
+      height: 360px;
       position: relative;
     }
 
@@ -713,9 +719,11 @@
           <button id="sweep-charts-btn" disabled>Gráficos</button>
         </div>
         <div id="sweep-charts-box" style="display:none;">
-          <div class="chart-box"><canvas id="pf-vs-adx-chart"></canvas></div>
-          <div class="chart-box"><canvas id="pf-vs-atrmult-chart"></canvas></div>
-          <div class="chart-box"><canvas id="pf-vs-rr-chart"></canvas></div>
+          <div id="sweep-charts-grid">
+            <div class="chart-box"><canvas id="pf-vs-adx-chart"></canvas></div>
+            <div class="chart-box"><canvas id="pf-vs-atrmult-chart"></canvas></div>
+            <div class="chart-box"><canvas id="pf-vs-rr-chart"></canvas></div>
+          </div>
         </div>
         <div class="table-wrap">
           <table>
@@ -2402,17 +2410,34 @@
           groups.get(k).push(r.profitFactor);
         }
         const paramValues = [...groups.keys()].sort((a, b) => a - b);
+        var allPfs = [];
         const avgs = paramValues.map(v => {
           const arr = groups.get(v);
+          allPfs = allPfs.concat(arr);
           return arr.reduce((a, b) => a + b, 0) / arr.length;
         });
-        return { labels: paramValues.map(v => String(v)), data: avgs };
+        var overallAvg = allPfs.reduce(function (s, v) { return s + v; }, 0) / allPfs.length;
+        var overallMax = Math.max.apply(null, allPfs);
+        var overallMin = Math.min.apply(null, allPfs);
+        // Find best param (highest average PF)
+        var bestIdx = 0;
+        for (var bi = 1; bi < avgs.length; bi++) { if (avgs[bi] > avgs[bestIdx]) bestIdx = bi; }
+        return {
+          labels: paramValues.map(v => String(v)),
+          data: avgs,
+          overallAvg: overallAvg,
+          overallMax: overallMax,
+          overallMin: overallMin,
+          count: allPfs.length,
+          bestParam: paramValues[bestIdx],
+          bestValue: avgs[bestIdx]
+        };
       }
 
       function drawBarChart(ctx, canvas, result, title, xLabel) {
         var w = canvas.width;
         var h = canvas.height;
-        var pad = { top: 40, right: 20, bottom: 50, left: 70 };
+        var pad = { top: 40, right: 90, bottom: 50, left: 70 };
         var chartW = w - pad.left - pad.right;
         var chartH = h - pad.top - pad.bottom;
 
@@ -2424,9 +2449,9 @@
 
         // Title
         ctx.fillStyle = "#e6edf3";
-        ctx.font = "13px sans-serif";
+        ctx.font = "bold 13px sans-serif";
         ctx.textAlign = "center";
-        ctx.fillText(title, w / 2, 22);
+        ctx.fillText(title, w / 2, 20);
 
         if (!result || !result.labels || !result.labels.length || !result.data || !result.data.length) {
           ctx.fillStyle = "#7d8590";
@@ -2438,14 +2463,16 @@
         var labels = result.labels;
         var data = result.data;
         var n = labels.length;
+        var overallAvg = result.overallAvg;
 
-        // Find max value
+        // Find max value (ensure avg line is visible)
         var maxVal = 0;
         for (var i = 0; i < n; i++) {
           if (data[i] > maxVal) maxVal = data[i];
         }
+        if (overallAvg > maxVal) maxVal = overallAvg;
         if (maxVal <= 0) maxVal = 1;
-        maxVal = Math.ceil(maxVal * 1.15);
+        maxVal = Math.ceil(maxVal * 1.2);
 
         // Grid lines (horizontal)
         ctx.strokeStyle = "#1c2733";
@@ -2472,6 +2499,23 @@
         ctx.textAlign = "center";
         ctx.fillText(xLabel, w / 2, h - 8);
 
+        // Average line (dashed, horizontal)
+        var avgY = pad.top + chartH - (overallAvg / maxVal) * chartH;
+        ctx.save();
+        ctx.setLineDash([4, 4]);
+        ctx.strokeStyle = "#f0883e";
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.moveTo(pad.left, avgY);
+        ctx.lineTo(w - pad.right, avgY);
+        ctx.stroke();
+        ctx.restore();
+        // Avg label on right side
+        ctx.fillStyle = "#f0883e";
+        ctx.font = "9px sans-serif";
+        ctx.textAlign = "left";
+        ctx.fillText("prom " + overallAvg.toFixed(3), w - pad.right + 4, avgY + 3);
+
         // Bars
         var barW = Math.max(6, Math.min(40, chartW / n * 0.7));
         var gap = (chartW - barW * n) / (n + 1);
@@ -2483,14 +2527,44 @@
           var x = pad.left + gap + (barW + gap) * bi;
           var yBar = pad.top + chartH - barH;
 
-          // Bar
-          ctx.fillStyle = "#4da3ff";
+          // Bar color: green if >= avg, red if < avg
+          ctx.fillStyle = data[bi] >= overallAvg ? "#3fb950" : "#da3633";
           ctx.fillRect(x, yBar, barW, barH);
+
+          // Value label on top of bar
+          ctx.fillStyle = "#e6edf3";
+          ctx.font = "bold 9px sans-serif";
+          ctx.fillText(data[bi].toFixed(3), x + barW / 2, yBar - 4);
 
           // X label
           ctx.fillStyle = "#7d8590";
           ctx.font = "9px sans-serif";
           ctx.fillText(labels[bi], x + barW / 2, pad.top + chartH + 14);
+        }
+
+        // Stats panel (top-right corner)
+        var statsX = w - 82;
+        var statsY = 28;
+        ctx.fillStyle = "rgba(13,17,23,0.85)";
+        ctx.fillRect(statsX, statsY, 78, 80);
+        ctx.strokeStyle = "#30363d";
+        ctx.lineWidth = 1;
+        ctx.strokeRect(statsX, statsY, 78, 80);
+
+        ctx.font = "8px sans-serif";
+        ctx.textAlign = "left";
+        var lines = [
+          { label: "Promedio", value: overallAvg.toFixed(3), color: "#f0883e" },
+          { label: "Max", value: result.overallMax.toFixed(3), color: "#3fb950" },
+          { label: "Min", value: result.overallMin.toFixed(3), color: "#da3633" },
+          { label: "Muestras", value: String(result.count), color: "#7d8590" },
+          { label: "Mejor param", value: String(result.bestParam) + " (" + result.bestValue.toFixed(3) + ")", color: "#4da3ff" },
+        ];
+        for (var li = 0; li < lines.length; li++) {
+          ctx.fillStyle = "#7d8590";
+          ctx.fillText(lines[li].label, statsX + 5, statsY + 13 + li * 14);
+          ctx.fillStyle = lines[li].color;
+          ctx.fillText(lines[li].value, statsX + 5, statsY + 23 + li * 14);
         }
       }
 
