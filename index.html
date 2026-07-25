@@ -5,59 +5,18 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Backtest Squeeze Momentum + ADX</title>
-  <script>window.__libFail = window.__libFail || []; window.__libLoaded = {};</script>
-  <!-- All from jsDelivr for CDN consistency; reduce adblock false-positives -->
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"
-    onerror="window.__libFail.push('Chart.js');" onload="window.__libLoaded.chart=1;"></script>
-  <script src="https://cdn.jsdelivr.net/npm/luxon@2.5.2/build/global/luxon.min.js"
-    onerror="window.__libFail.push('Luxon');" onload="window.__libLoaded.luxon=1;"></script>
-  <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-luxon@1.3.1/dist/chartjs-adapter-luxon.umd.min.js"
-    onerror="window.__libFail.push('chartjs-adapter-luxon');" onload="window.__libLoaded.adapter=1;"></script>
-  <script src="https://cdn.jsdelivr.net/npm/chartjs-chart-financial@0.2.1/dist/chartjs-chart-financial.umd.min.js"
-    onerror="window.__libFail.push('chartjs-chart-financial');" onload="window.__libLoaded.financial=1;"></script>
-  <!-- Fallback encadenado asincrono: si alguna librería falló, se recarga en orden desde unpkg -->
+  <script
+    src="https://cdn.jsdelivr.net/npm/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
   <script>
-    !function () {
-      var f = window.__libFail || [];
-      if (!f.length) return;
-      var m = {};
-      f.forEach(function (n) { m[n] = 1; });
-      var d = document;
-      function loadScript(s) {
-        return new Promise(function (resolve, reject) {
-          var t = d.createElement('script');
-          t.src = s;
-          t.async = false;
-          t.onload = resolve;
-          t.onerror = reject;
-          d.head.appendChild(t);
-        });
+    window.addEventListener('error', function loadFallback(e) {
+      if (typeof LightweightCharts === 'undefined') {
+        var s = document.createElement('script');
+        s.src = 'https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js';
+        s.onload = function () { if (window.__initApp) window.__initApp(); };
+        document.head.appendChild(s);
+        window.removeEventListener('error', loadFallback);
       }
-      var chain = Promise.resolve();
-      if (m['Chart.js']) {
-        chain = chain.then(function () {
-          return loadScript('https://unpkg.com/chart.js@4.4.4/dist/chart.umd.min.js');
-        });
-      }
-      if (m['Luxon']) {
-        chain = chain.then(function () {
-          return loadScript('https://unpkg.com/luxon@2.5.2/build/global/luxon.min.js');
-        });
-      }
-      if (m['chartjs-adapter-luxon']) {
-        chain = chain.then(function () {
-          return loadScript('https://unpkg.com/chartjs-adapter-luxon@1.3.1/dist/chartjs-adapter-luxon.umd.min.js');
-        });
-      }
-      if (m['chartjs-chart-financial']) {
-        chain = chain.then(function () {
-          return loadScript('https://unpkg.com/chartjs-chart-financial@0.2.1/dist/chartjs-chart-financial.umd.min.js');
-        });
-      }
-      chain.catch(function (err) {
-        console.warn('Fallback CDN load failed:', err);
-      });
-    }();
+    }, true);
   </script>
   <style>
     :root {
@@ -661,8 +620,12 @@
         <div id="metrics-box">
           <p class="muted">Descarga velas y ejecuta un backtest para ver resultados.</p>
         </div>
-        <div class="chart-box" style="height:420px;"><canvas id="price-chart"></canvas></div>
-        <div class="chart-box" style="height:220px;"><canvas id="equity-chart"></canvas></div>
+        <div class="chart-box" style="height:420px;">
+          <div id="price-chart"></div>
+        </div>
+        <div class="chart-box" style="height:220px;">
+          <div id="equity-chart"></div>
+        </div>
         <div class="flex-row" style="margin-bottom:8px;">
           <button id="export-trades-btn" disabled>Exportar operaciones (CSV)</button>
         </div>
@@ -1857,8 +1820,20 @@
         data: null,
         backtestResult: null,
         sweepRows: null,
-        priceChart: null,
-        equityChart: null,
+        priceChart: null,   // LightweightCharts instance
+        equityChart: null,  // LightweightCharts instance
+        priceCandleSeries: null,
+        priceEma20Series: null,
+        priceEma50Series: null,
+        priceEma200Series: null,
+        priceBbUpperSeries: null,
+        priceBbLowerSeries: null,
+        priceBuyMarkers: null,
+        priceSellMarkers: null,
+        equityLineSeries: null,
+        pfAdxChart: null,   // canvas 2D (replaces Chart.js bar)
+        pfAtrChart: null,
+        pfRrChart: null,
       };
 
       const $ = (id) => document.getElementById(id);
@@ -2015,132 +1990,206 @@
         ).join("");
       }
 
-      function sampleLabels(candles) {
-        return candles.map(c => fmtDate(c.t));
+      // --- LightweightCharts rendering (replaces Chart.js) ---
+
+      function candlesToLw(candles) {
+        // LightweightCharts uses Unix timestamps in SECONDS
+        return candles.map(function (cd) {
+          return { time: Math.floor(cd.t / 1000), open: cd.o, high: cd.h, low: cd.l, close: cd.c };
+        });
       }
 
-      function ensureCanvasSize(canvasId) {
-        var el = $(canvasId);
-        if (!el) return;
-        // Force the canvas to have explicit dimensions so Chart.js doesn't choke
-        var parent = el.parentElement;
-        if (el.clientWidth === 0 || el.clientHeight === 0) {
-          if (parent) {
-            el.style.width = parent.clientWidth + "px";
-            el.style.height = parent.clientHeight + "px";
-          } else {
-            el.style.width = "100%";
-            el.style.height = "300px";
-          }
-          el.width = el.offsetWidth || parseInt(el.style.width) || 800;
-          el.height = el.offsetHeight || parseInt(el.style.height) || 300;
-        }
+      function seriesToLw(candles, arr) {
+        return candles.map(function (cd, i) {
+          var v = arr[i];
+          if (v === null || v === undefined || Number.isNaN(v)) return null;
+          return { time: Math.floor(cd.t / 1000), value: v };
+        }).filter(Boolean);
       }
 
       function renderPriceChart(data, result) {
-        // Guard rapido antes de cualquier operacion
-        if (typeof Chart === "undefined") {
-          showError("Chart.js no se cargo. Revisa tu conexion a internet o algun bloqueador de anuncios.");
+        if (typeof LightweightCharts === "undefined") {
+          showError("LightweightCharts no se cargo. Revisa tu conexion a internet o algun bloqueador de anuncios.");
           return;
         }
-        if (!Chart.registry.getController("candlestick")) {
-          showError("El controlador de velas (chartjs-chart-financial) no se registro. Revisa tu conexion o adblocker.");
-          return;
-        }
-        var canvas = $("price-chart");
-        if (!canvas) { log("ERROR: no se encontro el canvas price-chart"); return; }
-        ensureCanvasSize("price-chart");
-        var ctx = canvas.getContext("2d");
+        var container = $("price-chart");
+        if (!container) { log("ERROR: no se encontro el contenedor price-chart"); return; }
         var params = state.lastParams;
         var candles = data.candles;
-        var candleData = candles.map(function (cd) { return { x: cd.t, o: cd.o, h: cd.h, l: cd.l, c: cd.c }; });
-        var toXY = function (arr) { return candles.map(function (cd, i) { return { x: cd.t, y: arr[i] }; }); };
 
-        var datasets = [
-          {
-            type: "candlestick",
-            label: "Precio",
-            data: candleData,
-            borderColors: { up: "#3fb950", down: "#f85149", unchanged: "#7d8590" },
-            backgroundColors: { up: "rgba(63,185,80,0.5)", down: "rgba(248,81,73,0.5)", unchanged: "rgba(125,133,144,0.5)" },
-            order: 2,
-          },
-        ];
-        if (params.ema20.enabled) datasets.push({ type: "line", label: "EMA20", data: toXY(data.ema20), borderColor: "#4da3ff", borderWidth: 1, pointRadius: 0, order: 1 });
-        if (params.ema50.enabled) datasets.push({ type: "line", label: "EMA50", data: toXY(data.ema50), borderColor: "#ff9f40", borderWidth: 1, pointRadius: 0, order: 1 });
-        if (params.ema200.enabled) datasets.push({ type: "line", label: "EMA200", data: toXY(data.ema200), borderColor: "#c084fc", borderWidth: 1, pointRadius: 0, order: 1 });
-        if (params.bb.enabled) {
-          datasets.push({ type: "line", label: "BB sup.", data: toXY(data.bbUpper), borderColor: "#2dd4d4", borderWidth: 1, borderDash: [4, 3], pointRadius: 0, order: 1 });
-          datasets.push({ type: "line", label: "BB inf.", data: toXY(data.bbLower), borderColor: "#2dd4d4", borderWidth: 1, borderDash: [4, 3], pointRadius: 0, order: 1 });
+        // Destruir instancia previa
+        if (state.priceChart) {
+          try { state.priceChart.remove(); } catch (e) { }
+          state.priceChart = null;
+          state.priceCandleSeries = null;
+          state.priceEma20Series = null;
+          state.priceEma50Series = null;
+          state.priceEma200Series = null;
+          state.priceBbUpperSeries = null;
+          state.priceBbLowerSeries = null;
+          state.priceBuyMarkers = null;
+          state.priceSellMarkers = null;
         }
-        var buyPts = candles.map(function (cd, i) { return data.signal[i] === "BUY" ? { x: cd.t, y: data.lows[i] * 0.998 } : null; }).filter(Boolean);
-        var sellPts = candles.map(function (cd, i) { return data.signal[i] === "SELL" ? { x: cd.t, y: data.highs[i] * 1.002 } : null; }).filter(Boolean);
-        datasets.push({ type: "line", label: "BUY", data: buyPts, borderColor: "transparent", backgroundColor: "#3fb950", pointBackgroundColor: "#3fb950", pointRadius: 5, pointStyle: "triangle", showLine: false, order: 0 });
-        datasets.push({ type: "line", label: "SELL", data: sellPts, borderColor: "transparent", backgroundColor: "#f85149", pointBackgroundColor: "#f85149", pointRadius: 5, pointStyle: "rectRot", showLine: false, order: 0 });
 
-        if (state.priceChart) state.priceChart.destroy();
-        state.priceChart = new Chart(ctx, {
-          type: "candlestick",
-          data: { datasets },
-          options: candleChartOptions("Precio (velas reales) + señales"),
+        var w = container.clientWidth || 800;
+        var h = container.clientHeight || 400;
+
+        state.priceChart = LightweightCharts.createChart(container, {
+          layout: {
+            background: { type: "solid", color: "#0d1117" },
+            textColor: "#e6edf3",
+            fontSize: 11,
+          },
+          grid: {
+            vertLines: { color: "#1c2733" },
+            horzLines: { color: "#1c2733" },
+          },
+          crosshair: {
+            mode: LightweightCharts.CrosshairMode.Normal,
+            vertLine: { color: "rgba(0,229,255,0.4)", width: 1, style: LightweightCharts.LineStyle.Dashed, labelBackgroundColor: "#00e5ff" },
+            horzLine: { color: "rgba(0,229,255,0.4)", width: 1, style: LightweightCharts.LineStyle.Dashed, labelBackgroundColor: "#00e5ff" },
+          },
+          rightPriceScale: { borderColor: "#1c2733" },
+          timeScale: {
+            borderColor: "#1c2733",
+            timeVisible: true,
+            secondsVisible: false,
+          },
+          width: w,
+          height: h,
         });
-      }
 
-      function candleChartOptions(title) {
-        return {
-          responsive: true,
-          maintainAspectRatio: false,
-          animation: false,
-          interaction: { mode: "index", intersect: false },
-          plugins: {
-            title: { display: true, text: title, color: "#e6edf3" },
-            legend: { labels: { color: "#9da7b3", boxWidth: 12, font: { size: 10 } } },
-          },
-          scales: {
-            x: {
-              type: "time",
-              time: { tooltipFormat: "yyyy-MM-dd HH:mm" },
-              ticks: { color: "#7d8590", maxTicksLimit: 10, autoSkip: true },
-              grid: { color: "#21262d" },
-            },
-            y: { ticks: { color: "#7d8590" }, grid: { color: "#21262d" } },
-          },
-        };
+        // Candlestick series
+        state.priceCandleSeries = state.priceChart.addCandlestickSeries({
+          upColor: "#3fb950",
+          downColor: "#f85149",
+          borderUpColor: "#3fb950",
+          borderDownColor: "#f85149",
+          wickUpColor: "rgba(63,185,80,0.7)",
+          wickDownColor: "rgba(248,81,73,0.7)",
+        });
+        state.priceCandleSeries.setData(candlesToLw(candles));
+
+        // EMA lines
+        if (params.ema20.enabled) {
+          state.priceEma20Series = state.priceChart.addLineSeries({ color: "#4da3ff", lineWidth: 1, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false });
+          state.priceEma20Series.setData(seriesToLw(candles, data.ema20));
+        }
+        if (params.ema50.enabled) {
+          state.priceEma50Series = state.priceChart.addLineSeries({ color: "#ff9f40", lineWidth: 1, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false });
+          state.priceEma50Series.setData(seriesToLw(candles, data.ema50));
+        }
+        if (params.ema200.enabled) {
+          state.priceEma200Series = state.priceChart.addLineSeries({ color: "#c084fc", lineWidth: 1, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false });
+          state.priceEma200Series.setData(seriesToLw(candles, data.ema200));
+        }
+
+        // Bollinger Bands
+        if (params.bb.enabled) {
+          state.priceBbUpperSeries = state.priceChart.addLineSeries({ color: "#2dd4d4", lineWidth: 1, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false, lineStyle: LightweightCharts.LineStyle.Dashed });
+          state.priceBbUpperSeries.setData(seriesToLw(candles, data.bbUpper));
+          state.priceBbLowerSeries = state.priceChart.addLineSeries({ color: "#2dd4d4", lineWidth: 1, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false, lineStyle: LightweightCharts.LineStyle.Dashed });
+          state.priceBbLowerSeries.setData(seriesToLw(candles, data.bbLower));
+        }
+
+        // BUY/SELL markers using the markers API
+        var markers = [];
+        for (var i = 0; i < candles.length; i++) {
+          var sig = data.signal[i];
+          if (sig === "BUY") {
+            markers.push({
+              time: Math.floor(candles[i].t / 1000),
+              position: "belowBar",
+              color: "#3fb950",
+              shape: "arrowUp",
+              text: "BUY",
+            });
+          } else if (sig === "SELL") {
+            markers.push({
+              time: Math.floor(candles[i].t / 1000),
+              position: "aboveBar",
+              color: "#f85149",
+              shape: "arrowDown",
+              text: "SELL",
+            });
+          }
+        }
+        if (markers.length) {
+          state.priceCandleSeries.setMarkers(markers);
+        }
+
+        // Resize observer
+        if (state._priceResizeObs) state._priceResizeObs.disconnect();
+        state._priceResizeObs = new ResizeObserver(function () {
+          if (container.clientWidth > 0 && container.clientHeight > 0) {
+            if (state.priceChart) state.priceChart.applyOptions({ width: container.clientWidth, height: container.clientHeight });
+          }
+        });
+        state._priceResizeObs.observe(container);
+
+        state.priceChart.timeScale().fitContent();
+        log("Grafico de precio renderizado con LightweightCharts.");
       }
 
       function renderEquityChart(equityCurve, candles) {
-        if (typeof Chart === "undefined") { log("Chart.js no disponible para equity chart."); return; }
-        var canvas = $("equity-chart");
-        if (!canvas) { log("ERROR: no se encontro el canvas equity-chart"); return; }
-        ensureCanvasSize("equity-chart");
-        var ctx = canvas.getContext("2d");
-        var labels = sampleLabels(candles);
-        if (state.equityChart) state.equityChart.destroy();
-        state.equityChart = new Chart(ctx, {
-          type: "line",
-          data: {
-            labels,
-            datasets: [{ label: "Equity", data: equityCurve, borderColor: "#3fb950", borderWidth: 1.3, pointRadius: 0, fill: true, backgroundColor: "rgba(63,185,80,0.08)" }],
-          },
-          options: chartOptions("Curva de equity"),
-        });
-      }
+        if (typeof LightweightCharts === "undefined") { log("LightweightCharts no disponible para equity chart."); return; }
+        var container = $("equity-chart");
+        if (!container) { log("ERROR: no se encontro el contenedor equity-chart"); return; }
 
-      function chartOptions(title) {
-        return {
-          responsive: true,
-          maintainAspectRatio: false,
-          animation: false,
-          interaction: { mode: "index", intersect: false },
-          plugins: {
-            title: { display: true, text: title, color: "#e6edf3" },
-            legend: { labels: { color: "#9da7b3", boxWidth: 12, font: { size: 10 } } },
+        if (state.equityChart) {
+          try { state.equityChart.remove(); } catch (e) { }
+          state.equityChart = null;
+          state.equityLineSeries = null;
+        }
+
+        var w = container.clientWidth || 800;
+        var h = container.clientHeight || 220;
+
+        state.equityChart = LightweightCharts.createChart(container, {
+          layout: {
+            background: { type: "solid", color: "#0d1117" },
+            textColor: "#e6edf3",
+            fontSize: 11,
           },
-          scales: {
-            x: { ticks: { color: "#7d8590", maxTicksLimit: 10, autoSkip: true }, grid: { color: "#21262d" } },
-            y: { ticks: { color: "#7d8590" }, grid: { color: "#21262d" } },
+          grid: {
+            vertLines: { color: "#1c2733" },
+            horzLines: { color: "#1c2733" },
           },
-        };
+          rightPriceScale: { borderColor: "#1c2733" },
+          timeScale: {
+            borderColor: "#1c2733",
+            timeVisible: true,
+            secondsVisible: false,
+          },
+          width: w,
+          height: h,
+        });
+
+        state.equityLineSeries = state.equityChart.addLineSeries({
+          color: "#3fb950",
+          lineWidth: 1.3,
+          priceLineVisible: false,
+          lastValueVisible: true,
+          crosshairMarkerVisible: true,
+        });
+
+        var lwData = candles.map(function (cd, i) {
+          var v = equityCurve[i];
+          if (v === null || v === undefined || Number.isNaN(v)) return null;
+          return { time: Math.floor(cd.t / 1000), value: v };
+        }).filter(Boolean);
+        state.equityLineSeries.setData(lwData);
+
+        if (state._equityResizeObs) state._equityResizeObs.disconnect();
+        state._equityResizeObs = new ResizeObserver(function () {
+          if (container.clientWidth > 0 && container.clientHeight > 0) {
+            if (state.equityChart) state.equityChart.applyOptions({ width: container.clientWidth, height: container.clientHeight });
+          }
+        });
+        state._equityResizeObs.observe(container);
+
+        state.equityChart.timeScale().fitContent();
+        log("Grafico de equity renderizado con LightweightCharts.");
       }
 
       function renderTradesTable(data, result, params) {
@@ -2360,24 +2409,92 @@
         return { labels: paramValues.map(v => String(v)), data: avgs };
       }
 
-      function barChartOptions(title, xLabel) {
-        return {
-          responsive: true,
-          maintainAspectRatio: false,
-          animation: false,
-          plugins: {
-            title: { display: true, text: title, color: "#e6edf3" },
-            legend: { display: false },
-          },
-          scales: {
-            x: { title: { display: true, text: xLabel, color: "#7d8590" }, ticks: { color: "#7d8590" }, grid: { color: "#21262d" } },
-            y: { title: { display: true, text: "Profit Factor (prom.)", color: "#7d8590" }, ticks: { color: "#7d8590" }, grid: { color: "#21262d" }, beginAtZero: true },
-          },
-        };
+      function drawBarChart(ctx, canvas, result, title, xLabel) {
+        var w = canvas.width;
+        var h = canvas.height;
+        var pad = { top: 40, right: 20, bottom: 50, left: 70 };
+        var chartW = w - pad.left - pad.right;
+        var chartH = h - pad.top - pad.bottom;
+
+        ctx.clearRect(0, 0, w, h);
+
+        // Background
+        ctx.fillStyle = "#0d1117";
+        ctx.fillRect(0, 0, w, h);
+
+        // Title
+        ctx.fillStyle = "#e6edf3";
+        ctx.font = "13px sans-serif";
+        ctx.textAlign = "center";
+        ctx.fillText(title, w / 2, 22);
+
+        if (!result || !result.labels || !result.labels.length || !result.data || !result.data.length) {
+          ctx.fillStyle = "#7d8590";
+          ctx.font = "12px sans-serif";
+          ctx.fillText("Sin datos", w / 2, h / 2);
+          return;
+        }
+
+        var labels = result.labels;
+        var data = result.data;
+        var n = labels.length;
+
+        // Find max value
+        var maxVal = 0;
+        for (var i = 0; i < n; i++) {
+          if (data[i] > maxVal) maxVal = data[i];
+        }
+        if (maxVal <= 0) maxVal = 1;
+        maxVal = Math.ceil(maxVal * 1.15);
+
+        // Grid lines (horizontal)
+        ctx.strokeStyle = "#1c2733";
+        ctx.lineWidth = 1;
+        var nGrid = 4;
+        for (var gi = 0; gi <= nGrid; gi++) {
+          var y = pad.top + (chartH / nGrid) * gi;
+          ctx.beginPath();
+          ctx.moveTo(pad.left, y);
+          ctx.lineTo(w - pad.right, y);
+          ctx.stroke();
+
+          // Y label
+          var val = maxVal - (maxVal / nGrid) * gi;
+          ctx.fillStyle = "#7d8590";
+          ctx.font = "10px sans-serif";
+          ctx.textAlign = "right";
+          ctx.fillText(val.toFixed(2), pad.left - 6, y + 4);
+        }
+
+        // X label
+        ctx.fillStyle = "#7d8590";
+        ctx.font = "11px sans-serif";
+        ctx.textAlign = "center";
+        ctx.fillText(xLabel, w / 2, h - 8);
+
+        // Bars
+        var barW = Math.max(6, Math.min(40, chartW / n * 0.7));
+        var gap = (chartW - barW * n) / (n + 1);
+        if (gap < 2) { gap = 2; barW = Math.max(6, (chartW - gap * (n + 1)) / n); }
+
+        ctx.textAlign = "center";
+        for (var bi = 0; bi < n; bi++) {
+          var barH = (data[bi] / maxVal) * chartH;
+          var x = pad.left + gap + (barW + gap) * bi;
+          var yBar = pad.top + chartH - barH;
+
+          // Bar
+          ctx.fillStyle = "#4da3ff";
+          ctx.fillRect(x, yBar, barW, barH);
+
+          // X label
+          ctx.fillStyle = "#7d8590";
+          ctx.font = "9px sans-serif";
+          ctx.fillText(labels[bi], x + barW / 2, pad.top + chartH + 14);
+        }
       }
 
       function renderSweepCharts(rows) {
-        if (typeof Chart === "undefined") { log("Chart.js no disponible para graficos de barrido."); return; }
         var specs = [
           { key: "adxLevel", canvasId: "pf-vs-adx-chart", stateKey: "pfAdxChart", title: "Profit Factor vs Nivel ADX", xLabel: "Nivel ADX" },
           { key: "atrMult", canvasId: "pf-vs-atrmult-chart", stateKey: "pfAtrChart", title: "Profit Factor vs Mult. ATR", xLabel: "Mult. ATR" },
@@ -2387,16 +2504,37 @@
           var s = specs[si];
           var canvas = $(s.canvasId);
           if (!canvas) continue;
-          ensureCanvasSize(s.canvasId);
-          var result = avgProfitFactorByParam(rows, s.key);
-          if (state[s.stateKey]) state[s.stateKey].destroy();
+          var parent = canvas.parentElement;
+          var dpr = window.devicePixelRatio || 1;
+          var w = parent.clientWidth || 400;
+          var h = parent.clientHeight || 200;
+          canvas.width = w * dpr;
+          canvas.height = h * dpr;
+          canvas.style.width = w + "px";
+          canvas.style.height = h + "px";
           var ctx = canvas.getContext("2d");
-          state[s.stateKey] = new Chart(ctx, {
-            type: "bar",
-            data: { labels: result.labels, datasets: [{ label: "Profit Factor", data: result.data, backgroundColor: "#4da3ff" }] },
-            options: barChartOptions(s.title, s.xLabel),
-          });
+          ctx.scale(dpr, dpr);
+          var result = avgProfitFactorByParam(rows, s.key);
+          drawBarChart(ctx, { width: w, height: h }, result, s.title, s.xLabel);
+          state[s.stateKey] = { canvas: canvas, width: w, height: h, dpr: dpr, result: result, title: s.title, xLabel: s.xLabel };
         }
+      }
+
+      function redrawSweepChart(stateKey, canvas) {
+        var s = state[stateKey];
+        if (!s) return;
+        var parent = canvas.parentElement;
+        var dpr = window.devicePixelRatio || 1;
+        var w = parent.clientWidth || 400;
+        var h = parent.clientHeight || 200;
+        canvas.width = w * dpr;
+        canvas.height = h * dpr;
+        canvas.style.width = w + "px";
+        canvas.style.height = h + "px";
+        var ctx = canvas.getContext("2d");
+        ctx.scale(dpr, dpr);
+        drawBarChart(ctx, { width: w, height: h }, s.result, s.title, s.xLabel);
+        s.width = w; s.height = h; s.dpr = dpr;
       }
 
       function toggleSweepCharts() {
@@ -2406,22 +2544,33 @@
         box.style.display = "block";
         const rows = state.sweepRows || [];
         if (rows.length) renderSweepCharts(rows);
-        requestAnimationFrame(() => {
-          if (state.pfAdxChart) state.pfAdxChart.resize();
-          if (state.pfAtrChart) state.pfAtrChart.resize();
-          if (state.pfRrChart) state.pfRrChart.resize();
+        requestAnimationFrame(function () {
+          // Redraw sweep charts at correct size
+          ["pf-vs-adx-chart", "pf-vs-atrmult-chart", "pf-vs-rr-chart"].forEach(function (canvasId) {
+            var canvas = $(canvasId);
+            if (!canvas) return;
+            if (canvasId === "pf-vs-adx-chart" && state.pfAdxChart) redrawSweepChart("pfAdxChart", canvas);
+            if (canvasId === "pf-vs-atrmult-chart" && state.pfAtrChart) redrawSweepChart("pfAtrChart", canvas);
+            if (canvasId === "pf-vs-rr-chart" && state.pfRrChart) redrawSweepChart("pfRrChart", canvas);
+          });
         });
       }
 
       function activateTab(tabId) {
-        document.querySelectorAll(".tab-btn").forEach(b => b.classList.toggle("active", b.dataset.tab === tabId));
-        document.querySelectorAll(".tab-panel").forEach(p => p.classList.toggle("active", p.id === tabId));
-        requestAnimationFrame(() => {
-          if (state.priceChart) state.priceChart.resize();
-          if (state.equityChart) state.equityChart.resize();
-          if (state.pfAdxChart) state.pfAdxChart.resize();
-          if (state.pfAtrChart) state.pfAtrChart.resize();
-          if (state.pfRrChart) state.pfRrChart.resize();
+        document.querySelectorAll(".tab-btn").forEach(function (b) { return b.classList.toggle("active", b.dataset.tab === tabId); });
+        document.querySelectorAll(".tab-panel").forEach(function (p) { return p.classList.toggle("active", p.id === tabId); });
+        // LightweightCharts auto-resizes via ResizeObserver; just trigger reflow
+        if (state.priceChart) state.priceChart.timeScale().fitContent();
+        if (state.equityChart) state.equityChart.timeScale().fitContent();
+        // Redraw canvas sweep charts
+        requestAnimationFrame(function () {
+          ["pf-vs-adx-chart", "pf-vs-atrmult-chart", "pf-vs-rr-chart"].forEach(function (canvasId) {
+            var canvas = $(canvasId);
+            if (!canvas) return;
+            if (canvasId === "pf-vs-adx-chart" && state.pfAdxChart) redrawSweepChart("pfAdxChart", canvas);
+            if (canvasId === "pf-vs-atrmult-chart" && state.pfAtrChart) redrawSweepChart("pfAtrChart", canvas);
+            if (canvasId === "pf-vs-rr-chart" && state.pfRrChart) redrawSweepChart("pfRrChart", canvas);
+          });
         });
       }
 
@@ -2431,49 +2580,28 @@
         $("yahoo-note").style.display = isYahoo ? "block" : "none";
         if (isYahoo && !$("symbol").value.trim()) $("symbol").value = "GC=F";
       }
-      function checkLibs() {
-        var ok = typeof window.Chart !== "undefined" &&
-          typeof window.luxon !== "undefined" &&
-          !!(window.Chart && window.Chart.registry && window.Chart.registry.controllers.get("candlestick"));
-        if (ok) {
-          log("Librerias de graficos (Chart.js, Luxon, velas) cargadas correctamente.");
-          return true;
-        }
-        return false;
-      }
 
       function init() {
-        window.addEventListener("error", (e) => {
-          log(`ERROR JS no capturado: ${e.message} (${e.filename ? e.filename.split("/").pop() : ""}:${e.lineno || "?"})`);
+        window.addEventListener("error", function (e) {
+          log("ERROR JS no capturado: " + e.message + " (" + (e.filename ? e.filename.split("/").pop() : "") + ":" + (e.lineno || "?") + ")");
         });
-        window.addEventListener("unhandledrejection", (e) => {
-          log(`ERROR (promesa) no capturado: ${e.reason && e.reason.message ? e.reason.message : e.reason}`);
+        window.addEventListener("unhandledrejection", function (e) {
+          log("ERROR (promesa) no capturado: " + (e.reason && e.reason.message ? e.reason.message : e.reason));
         });
 
-        // Retry lib check up to 3 times with 1s delay to allow fallback CDNs to load
-        var retries = 0;
-        function tryCheck() {
-          if (checkLibs()) return;
-          retries++;
-          if (retries >= 3) {
-            var failed = [];
-            if (typeof window.Chart === "undefined") failed.push("Chart.js");
-            if (typeof window.luxon === "undefined") failed.push("Luxon");
-            if (!(window.Chart && window.Chart.registry && window.Chart.registry.controllers.get("candlestick"))) failed.push("Controlador de velas (chartjs-chart-financial)");
-            var warnMsg = "ATENCION: no cargaron estas librerias: " + failed.join(", ") + ". Revisa tu conexion a internet o un bloqueador de anuncios/scripts.";
-            log(warnMsg);
-            var metricsBox = $("metrics-box");
-            if (metricsBox) {
-              metricsBox.innerHTML = '<div style="background:#2d1215;border:1px solid var(--neg);border-radius:8px;padding:16px;margin-bottom:12px;">' +
-                '<div style="color:var(--neg);font-weight:600;margin-bottom:6px;">⚠ Librerias faltantes</div>' +
-                '<div style="color:var(--fg);font-size:13px;">' + warnMsg + '</div></div>';
-            }
-            return;
+        // Check LightweightCharts loaded (single library, no race condition)
+        if (typeof LightweightCharts === "undefined") {
+          var warnMsg = "ATENCION: LightweightCharts no se cargo. Revisa tu conexion a internet o un bloqueador de anuncios/scripts.";
+          log(warnMsg);
+          var metricsBox = $("metrics-box");
+          if (metricsBox) {
+            metricsBox.innerHTML = '<div style="background:#2d1215;border:1px solid var(--neg);border-radius:8px;padding:16px;margin-bottom:12px;">' +
+              '<div style="color:var(--neg);font-weight:600;margin-bottom:6px;">⚠ Libreria faltante</div>' +
+              '<div style="color:var(--fg);font-size:13px;">' + warnMsg + '</div></div>';
           }
-          setTimeout(tryCheck, 1000);
+        } else {
+          log("LightweightCharts cargado correctamente.");
         }
-        tryCheck();
-
 
         $("download-btn").addEventListener("click", onDownload);
         $("run-backtest-btn").addEventListener("click", onRunBacktest);
@@ -2488,20 +2616,32 @@
         ["sweep-atr-from", "sweep-atr-to", "sweep-atr-step",
           "sweep-rr-from", "sweep-rr-to", "sweep-rr-step",
           "sweep-adx-from", "sweep-adx-to", "sweep-adx-step",
-          "sweep-ema-from", "sweep-ema-to", "sweep-ema-step"].forEach(id => {
+          "sweep-ema-from", "sweep-ema-to", "sweep-ema-step"].forEach(function (id) {
             $(id).addEventListener("input", updateSweepComboCount);
           });
-        document.querySelectorAll(".sweep-tf").forEach(cb => cb.addEventListener("change", updateSweepComboCount));
+        document.querySelectorAll(".sweep-tf").forEach(function (cb) { return cb.addEventListener("change", updateSweepComboCount); });
         updateSweepComboCount();
 
-        document.querySelectorAll(".tab-btn").forEach(btn => {
-          btn.addEventListener("click", () => activateTab(btn.dataset.tab));
+        document.querySelectorAll(".tab-btn").forEach(function (btn) {
+          btn.addEventListener("click", function () { return activateTab(btn.dataset.tab); });
         });
 
         log("Interfaz lista. Descarga velas para empezar.");
       }
 
-      document.addEventListener("DOMContentLoaded", init);
+      // Handle LightweightCharts CDN fallback via __initApp
+      if (typeof LightweightCharts === "undefined") {
+        window.__initApp = init;
+        window.addEventListener("DOMContentLoaded", function () {
+          setTimeout(function () {
+            if (typeof LightweightCharts === "undefined") {
+              log("ERROR: LightweightCharts no se pudo cargar desde jsDelivr ni unpkg.");
+            }
+          }, 4000);
+        });
+      } else {
+        document.addEventListener("DOMContentLoaded", init);
+      }
     })();
   </script>
 </body>
