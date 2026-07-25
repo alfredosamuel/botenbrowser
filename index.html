@@ -6,7 +6,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Backtest Squeeze Momentum + ADX</title>
   <script>window.__libFail = window.__libFail || []; window.__libLoaded = {};</script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.4/chart.umd.min.js"
+  <!-- All from jsDelivr for CDN consistency; reduce adblock false-positives -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"
     onerror="window.__libFail.push('Chart.js');" onload="window.__libLoaded.chart=1;"></script>
   <script src="https://cdn.jsdelivr.net/npm/luxon@2.5.2/build/global/luxon.min.js"
     onerror="window.__libFail.push('Luxon');" onload="window.__libLoaded.luxon=1;"></script>
@@ -14,8 +15,50 @@
     onerror="window.__libFail.push('chartjs-adapter-luxon');" onload="window.__libLoaded.adapter=1;"></script>
   <script src="https://cdn.jsdelivr.net/npm/chartjs-chart-financial@0.2.1/dist/chartjs-chart-financial.umd.min.js"
     onerror="window.__libFail.push('chartjs-chart-financial');" onload="window.__libLoaded.financial=1;"></script>
-  <!-- CDN fallback loader: si alguna librería falló, intenta desde unpkg -->
-  <script>!function () { var f = window.__libFail || []; if (f.length) { var m = {}; f.forEach(function (n) { m[n] = 1 }); var d = document; function l(s) { var t = d.createElement('script'); t.src = s; t.async = false; d.head.appendChild(t); } if (m['Chart.js']) l('https://unpkg.com/chart.js@4.4.4/dist/chart.umd.min.js'); if (m['Luxon']) l('https://unpkg.com/luxon@2.5.2/build/global/luxon.min.js'); if (m['chartjs-adapter-luxon']) setTimeout(function () { l('https://unpkg.com/chartjs-adapter-luxon@1.3.1/dist/chartjs-adapter-luxon.umd.min.js') }, 200); if (m['chartjs-chart-financial']) setTimeout(function () { l('https://unpkg.com/chartjs-chart-financial@0.2.1/dist/chartjs-chart-financial.umd.min.js') }, 400); } }();</script>
+  <!-- Fallback encadenado asincrono: si alguna librería falló, se recarga en orden desde unpkg -->
+  <script>
+    !function () {
+      var f = window.__libFail || [];
+      if (!f.length) return;
+      var m = {};
+      f.forEach(function (n) { m[n] = 1; });
+      var d = document;
+      function loadScript(s) {
+        return new Promise(function (resolve, reject) {
+          var t = d.createElement('script');
+          t.src = s;
+          t.async = false;
+          t.onload = resolve;
+          t.onerror = reject;
+          d.head.appendChild(t);
+        });
+      }
+      var chain = Promise.resolve();
+      if (m['Chart.js']) {
+        chain = chain.then(function () {
+          return loadScript('https://unpkg.com/chart.js@4.4.4/dist/chart.umd.min.js');
+        });
+      }
+      if (m['Luxon']) {
+        chain = chain.then(function () {
+          return loadScript('https://unpkg.com/luxon@2.5.2/build/global/luxon.min.js');
+        });
+      }
+      if (m['chartjs-adapter-luxon']) {
+        chain = chain.then(function () {
+          return loadScript('https://unpkg.com/chartjs-adapter-luxon@1.3.1/dist/chartjs-adapter-luxon.umd.min.js');
+        });
+      }
+      if (m['chartjs-chart-financial']) {
+        chain = chain.then(function () {
+          return loadScript('https://unpkg.com/chartjs-chart-financial@0.2.1/dist/chartjs-chart-financial.umd.min.js');
+        });
+      }
+      chain.catch(function (err) {
+        console.warn('Fallback CDN load failed:', err);
+      });
+    }();
+  </script>
   <style>
     :root {
       --bg: #0d1117;
@@ -674,6 +717,14 @@
               <span>cada</span><input type="number" step="1" id="sweep-adx-step" value="2">
             </div>
           </div>
+          <div class="field row-full">
+            <label>Periodo EMA50</label>
+            <div class="range-row">
+              <span>desde</span><input type="number" step="10" id="sweep-ema-from" value="50">
+              <span>hasta</span><input type="number" step="10" id="sweep-ema-to" value="50">
+              <span>cada</span><input type="number" step="10" id="sweep-ema-step" value="10">
+            </div>
+          </div>
           <div id="sweep-combo-count" class="muted" style="font-size:11.5px;"></div>
           <div>
             <label style="font-size:12px;color:var(--fg-muted);">Temporalidades a barrer</label>
@@ -708,6 +759,7 @@
             <thead>
               <tr id="sweep-thead-row">
                 <th data-key="timeframe" data-type="str">TF</th>
+                <th data-key="emaPeriod" data-type="num">EMA</th>
                 <th data-key="atrMult" data-type="num">Mult.ATR</th>
                 <th data-key="rrRatio" data-type="num">R:R</th>
                 <th data-key="adxLevel" data-type="num">ADX</th>
@@ -730,7 +782,7 @@
             </thead>
             <tbody id="sweep-tbody">
               <tr>
-                <td colspan="19" class="muted">Sin resultados.</td>
+                <td colspan="20" class="muted">Sin resultados.</td>
               </tr>
             </tbody>
           </table>
@@ -1447,46 +1499,50 @@
         return out;
       }
 
-      // Corre todas las combinaciones (atrMult x rr) para UNA (temporalidad, nivel ADX).
+      // Corre todas las combinaciones (atrMult x rr x emaPeriod) para UNA (temporalidad, nivel ADX).
       // Es la unidad de trabajo que se reparte entre los Web Workers.
       function computeGroup(task, onTick) {
         const {
-          tf, adxLevel, candles, atrSeries, baseParams, atrMults, rrRatios,
+          tf, adxLevel, candles, atrSeries, baseParams, atrMults, rrRatios, emaPeriods,
           atrPeriod, initialCapital, riskPct, feePct, closeOnOppositeSignal,
         } = task;
         const params = JSON.parse(JSON.stringify(baseParams));
         params.adx.key_level = adxLevel;
-        const data = Strategy.computeSignals(candles, params);
         const rows = [];
         for (const atrMult of atrMults) {
           for (const rr of rrRatios) {
-            const result = Backtester.runBacktest(data, {
-              initialCapital, riskPct, feePct, atrPeriod, atrMult, rrRatio: rr,
-              closeOnOppositeSignal, atrSeries,
-            });
-            if (onTick) onTick();
-            const m = result.metrics;
-            if (!m) continue;
-            rows.push({
-              timeframe: tf, atrMult, rrRatio: rr, adxLevel,
-              retornoPct: m.totalReturnPct, winratePct: m.winRatePct,
-              maxDdPct: m.maxDrawdownPct, profitFactor: m.profitFactor,
-              nTrades: m.numTrades, liquidated: m.liquidated,
-              wins: m.wins, losses: m.losses,
-              avgWinPct: m.avgWinPct, avgLossPct: m.avgLossPct,
-              maxConsecutiveLosses: m.maxConsecutiveLosses,
-              tradingDurationMs: m.tradingDurationMs,
-              bestTradePct: m.bestTradePct, worstSlPct: m.worstSlPct,
-              finalCapital: m.finalCapital,
-              weeklyPct: weeklyReturnPct(m.totalReturnPct, m.tradingDurationMs),
-            });
+            for (const emaPeriod of emaPeriods) {
+              const p = JSON.parse(JSON.stringify(params));
+              p.ema50.period = emaPeriod;
+              const data = Strategy.computeSignals(candles, p);
+              const result = Backtester.runBacktest(data, {
+                initialCapital, riskPct, feePct, atrPeriod, atrMult, rrRatio: rr,
+                closeOnOppositeSignal, atrSeries,
+              });
+              if (onTick) onTick();
+              const m = result.metrics;
+              if (!m) continue;
+              rows.push({
+                timeframe: tf, emaPeriod, atrMult, rrRatio: rr, adxLevel,
+                retornoPct: m.totalReturnPct, winratePct: m.winRatePct,
+                maxDdPct: m.maxDrawdownPct, profitFactor: m.profitFactor,
+                nTrades: m.numTrades, liquidated: m.liquidated,
+                wins: m.wins, losses: m.losses,
+                avgWinPct: m.avgWinPct, avgLossPct: m.avgLossPct,
+                maxConsecutiveLosses: m.maxConsecutiveLosses,
+                tradingDurationMs: m.tradingDurationMs,
+                bestTradePct: m.bestTradePct, worstSlPct: m.worstSlPct,
+                finalCapital: m.finalCapital,
+                weeklyPct: weeklyReturnPct(m.totalReturnPct, m.tradingDurationMs),
+              });
+            }
           }
         }
         return rows;
       }
 
       function buildGroupTasks(opts) {
-        const { candlesByTf, baseParams, atrMults, rrRatios, adxLevels, atrPeriod = 14 } = opts;
+        const { candlesByTf, baseParams, atrMults, rrRatios, adxLevels, emaPeriods, atrPeriod = 14 } = opts;
         const tasks = [];
         for (const tf of Object.keys(candlesByTf)) {
           const candles = candlesByTf[tf];
@@ -1495,7 +1551,7 @@
           const atrSeries = Indicators.atr(highs, lows, closes, atrPeriod);
           for (const adxLevel of adxLevels) {
             tasks.push({
-              tf, adxLevel, candles, atrSeries, baseParams, atrMults, rrRatios,
+              tf, adxLevel, candles, atrSeries, baseParams, atrMults, rrRatios, emaPeriods,
               atrPeriod, initialCapital: opts.initialCapital, riskPct: opts.riskPct,
               feePct: opts.feePct, closeOnOppositeSignal: opts.closeOnOppositeSignal,
             });
@@ -1507,7 +1563,7 @@
       // Version secuencial (fallback si Web Workers no estan disponibles).
       function runSweep(opts, onProgress) {
         const tasks = buildGroupTasks(opts);
-        const total = tasks.reduce((s, t) => s + t.atrMults.length * t.rrRatios.length, 0);
+        const total = tasks.reduce((s, t) => s + t.atrMults.length * t.rrRatios.length * t.emaPeriods.length, 0);
         let done = 0;
         const rows = [];
         for (const task of tasks) {
@@ -1523,7 +1579,7 @@
       // una barra de progreso que se actualiza en tiempo real.
       function runSweepParallel(opts, onProgress) {
         const tasks = buildGroupTasks(opts);
-        const total = tasks.reduce((s, t) => s + t.atrMults.length * t.rrRatios.length, 0);
+        const total = tasks.reduce((s, t) => s + t.atrMults.length * t.rrRatios.length * t.emaPeriods.length, 0);
 
         if (typeof Worker === "undefined" || !tasks.length) {
           return Promise.resolve(runSweep(opts, onProgress));
@@ -1982,15 +2038,22 @@
       }
 
       function renderPriceChart(data, result) {
+        // Guard rapido antes de cualquier operacion
+        if (typeof Chart === "undefined") {
+          showError("Chart.js no se cargo. Revisa tu conexion a internet o algun bloqueador de anuncios.");
+          return;
+        }
+        if (!Chart.registry.getController("candlestick")) {
+          showError("El controlador de velas (chartjs-chart-financial) no se registro. Revisa tu conexion o adblocker.");
+          return;
+        }
         var canvas = $("price-chart");
         if (!canvas) { log("ERROR: no se encontro el canvas price-chart"); return; }
         ensureCanvasSize("price-chart");
         var ctx = canvas.getContext("2d");
         var params = state.lastParams;
         var candles = data.candles;
-
         var candleData = candles.map(function (cd) { return { x: cd.t, o: cd.o, h: cd.h, l: cd.l, c: cd.c }; });
-
         var toXY = function (arr) { return candles.map(function (cd, i) { return { x: cd.t, y: arr[i] }; }); };
 
         var datasets = [
@@ -2010,20 +2073,11 @@
           datasets.push({ type: "line", label: "BB sup.", data: toXY(data.bbUpper), borderColor: "#2dd4d4", borderWidth: 1, borderDash: [4, 3], pointRadius: 0, order: 1 });
           datasets.push({ type: "line", label: "BB inf.", data: toXY(data.bbLower), borderColor: "#2dd4d4", borderWidth: 1, borderDash: [4, 3], pointRadius: 0, order: 1 });
         }
-
         var buyPts = candles.map(function (cd, i) { return data.signal[i] === "BUY" ? { x: cd.t, y: data.lows[i] * 0.998 } : null; }).filter(Boolean);
         var sellPts = candles.map(function (cd, i) { return data.signal[i] === "SELL" ? { x: cd.t, y: data.highs[i] * 1.002 } : null; }).filter(Boolean);
         datasets.push({ type: "line", label: "BUY", data: buyPts, borderColor: "transparent", backgroundColor: "#3fb950", pointBackgroundColor: "#3fb950", pointRadius: 5, pointStyle: "triangle", showLine: false, order: 0 });
         datasets.push({ type: "line", label: "SELL", data: sellPts, borderColor: "transparent", backgroundColor: "#f85149", pointBackgroundColor: "#f85149", pointRadius: 5, pointStyle: "rectRot", showLine: false, order: 0 });
 
-        if (typeof Chart === "undefined") {
-          showError("Chart.js no se cargo. Revisa tu conexion a internet o algun bloqueador de anuncios.");
-          return;
-        }
-        if (!Chart.registry.getController("candlestick")) {
-          showError("El controlador de velas (chartjs-chart-financial) no se registro. Revisa tu conexion o adblocker.");
-          return;
-        }
         if (state.priceChart) state.priceChart.destroy();
         state.priceChart = new Chart(ctx, {
           type: "candlestick",
@@ -2055,6 +2109,7 @@
       }
 
       function renderEquityChart(equityCurve, candles) {
+        if (typeof Chart === "undefined") { log("Chart.js no disponible para equity chart."); return; }
         var canvas = $("equity-chart");
         if (!canvas) { log("ERROR: no se encontro el canvas equity-chart"); return; }
         ensureCanvasSize("equity-chart");
@@ -2129,20 +2184,21 @@
           atrMults: Sweep.rangeList($("sweep-atr-from").value, $("sweep-atr-to").value, $("sweep-atr-step").value),
           rrRatios: Sweep.rangeList($("sweep-rr-from").value, $("sweep-rr-to").value, $("sweep-rr-step").value),
           adxLevels: Sweep.rangeList($("sweep-adx-from").value, $("sweep-adx-to").value, $("sweep-adx-step").value),
+          emaPeriods: Sweep.rangeList($("sweep-ema-from").value, $("sweep-ema-to").value, $("sweep-ema-step").value),
         };
       }
 
       function updateSweepComboCount() {
-        const { atrMults, rrRatios, adxLevels } = readSweepRanges();
+        const { atrMults, rrRatios, adxLevels, emaPeriods } = readSweepRanges();
         const tfCount = document.querySelectorAll(".sweep-tf:checked").length;
-        const perTf = atrMults.length * rrRatios.length * adxLevels.length;
+        const perTf = atrMults.length * rrRatios.length * adxLevels.length * emaPeriods.length;
         $("sweep-combo-count").textContent =
-          `${atrMults.length} × ${rrRatios.length} × ${adxLevels.length} = ${perTf} combinaciones por temporalidad` +
+          `${atrMults.length} × ${rrRatios.length} × ${adxLevels.length} × ${emaPeriods.length} = ${perTf} combinaciones por temporalidad` +
           (tfCount ? ` (${perTf * tfCount} en total con ${tfCount} temporalidad${tfCount > 1 ? "es" : ""})` : "");
       }
 
       async function onRunSweep() {
-        const { atrMults, rrRatios, adxLevels } = readSweepRanges();
+        const { atrMults, rrRatios, adxLevels, emaPeriods } = readSweepRanges();
         const source = $("data-source").value;
         const symbol = $("symbol").value.trim() || (source === "yahoo" ? "GC=F" : "");
         const nCandles = +$("n-candles").value;
@@ -2150,7 +2206,7 @@
 
         const selectedTfs = Array.from(document.querySelectorAll(".sweep-tf:checked")).map(el => el.value);
         if (!selectedTfs.length) { log("Selecciona al menos una temporalidad para el barrido."); return; }
-        if (!atrMults.length || !rrRatios.length || !adxLevels.length) { log("Revisa los rangos de Mult.ATR / R:R / Niveles ADX."); return; }
+        if (!atrMults.length || !rrRatios.length || !adxLevels.length || !emaPeriods.length) { log("Revisa los rangos de Mult.ATR / R:R / Niveles ADX / Periodo EMA."); return; }
 
         $("run-sweep-btn").disabled = true;
         const total = selectedTfs.length;
@@ -2184,7 +2240,7 @@
 
         try {
           const rows = await Sweep.runSweepParallel({
-            candlesByTf, baseParams, atrMults, rrRatios, adxLevels,
+            candlesByTf, baseParams, atrMults, rrRatios, adxLevels, emaPeriods,
             atrPeriod: backtestBase.atrPeriod, initialCapital: backtestBase.initialCapital,
             riskPct: backtestBase.riskPct, feePct: backtestBase.feePct,
             closeOnOppositeSignal: backtestBase.closeOnOppositeSignal,
@@ -2214,10 +2270,10 @@
 
       function renderSweepTable(rows) {
         const tbody = $("sweep-tbody");
-        if (!rows.length) { tbody.innerHTML = "<tr><td colspan='19' class='muted'>Sin resultados.</td></tr>"; return; }
+        if (!rows.length) { tbody.innerHTML = "<tr><td colspan='20' class='muted'>Sin resultados.</td></tr>"; return; }
         tbody.innerHTML = rows.slice(0, 500).map(r => `
         <tr>
-          <td>${r.timeframe}</td><td>${r.atrMult}</td><td>${r.rrRatio}</td><td>${r.adxLevel}</td>
+          <td>${r.timeframe}</td><td>${r.emaPeriod}</td><td>${r.atrMult}</td><td>${r.rrRatio}</td><td>${r.adxLevel}</td>
           <td class="${r.retornoPct >= 0 ? "pos" : "neg"}">${fmtNum(r.retornoPct)}%</td>
           <td>${fmtNum(r.finalCapital)}</td>
           <td>${Number.isFinite(r.profitFactor) ? fmtNum(r.profitFactor) : "∞"}</td>
@@ -2275,11 +2331,11 @@
       function exportSweepCsv() {
         const rows = state.sweepRows || [];
         if (!rows.length) return;
-        const headers = ["timeframe", "atr_mult", "rr_ratio", "adx_level", "retorno_%", "capital_final", "profit_factor", "pct_semanal_ganado", "winrate_%", "n_trades", "wins", "losses", "ganancia_prom_%", "perdida_prom_%", "mejor_trade_%", "peor_sl_%", "max_dd_%", "racha_perdidas", "duracion_ms"];
+        const headers = ["timeframe", "ema_period", "atr_mult", "rr_ratio", "adx_level", "retorno_%", "capital_final", "profit_factor", "pct_semanal_ganado", "winrate_%", "n_trades", "wins", "losses", "ganancia_prom_%", "perdida_prom_%", "mejor_trade_%", "peor_sl_%", "max_dd_%", "racha_perdidas", "duracion_ms"];
         const lines = [headers.join(",")];
         for (const r of rows) {
           lines.push([
-            r.timeframe, r.atrMult, r.rrRatio, r.adxLevel, r.retornoPct, r.finalCapital,
+            r.timeframe, r.emaPeriod, r.atrMult, r.rrRatio, r.adxLevel, r.retornoPct, r.finalCapital,
             r.profitFactor, r.weeklyPct, r.winratePct, r.nTrades, r.wins, r.losses,
             r.avgWinPct, r.avgLossPct, r.bestTradePct, r.worstSlPct,
             r.maxDdPct, r.maxConsecutiveLosses, r.tradingDurationMs,
@@ -2321,6 +2377,7 @@
       }
 
       function renderSweepCharts(rows) {
+        if (typeof Chart === "undefined") { log("Chart.js no disponible para graficos de barrido."); return; }
         var specs = [
           { key: "adxLevel", canvasId: "pf-vs-adx-chart", stateKey: "pfAdxChart", title: "Profit Factor vs Nivel ADX", xLabel: "Nivel ADX" },
           { key: "atrMult", canvasId: "pf-vs-atrmult-chart", stateKey: "pfAtrChart", title: "Profit Factor vs Mult. ATR", xLabel: "Mult. ATR" },
@@ -2374,6 +2431,16 @@
         $("yahoo-note").style.display = isYahoo ? "block" : "none";
         if (isYahoo && !$("symbol").value.trim()) $("symbol").value = "GC=F";
       }
+      function checkLibs() {
+        var ok = typeof window.Chart !== "undefined" &&
+          typeof window.luxon !== "undefined" &&
+          !!(window.Chart && window.Chart.registry && window.Chart.registry.controllers.get("candlestick"));
+        if (ok) {
+          log("Librerias de graficos (Chart.js, Luxon, velas) cargadas correctamente.");
+          return true;
+        }
+        return false;
+      }
 
       function init() {
         window.addEventListener("error", (e) => {
@@ -2383,25 +2450,30 @@
           log(`ERROR (promesa) no capturado: ${e.reason && e.reason.message ? e.reason.message : e.reason}`);
         });
 
-        var libChecks = [
-          ["Chart.js", typeof window.Chart !== "undefined"],
-          ["Luxon", typeof window.luxon !== "undefined"],
-          ["Controlador de velas (chartjs-chart-financial)", !!(window.Chart && window.Chart.registry && window.Chart.registry.controllers.get("candlestick"))],
-        ];
-        var failed = libChecks.filter(function (c) { return !c[1]; }).map(function (c) { return c[0]; });
-        if (failed.length) {
-          var warnMsg = "ATENCION: no cargaron estas librerias: " + failed.join(", ") + ". Revisa tu conexion a internet o un bloqueador de anuncios/scripts.";
-          log(warnMsg);
-          // Show a visible persistent warning banner
-          var metricsBox = $("metrics-box");
-          if (metricsBox) {
-            metricsBox.innerHTML = '<div style="background:#2d1215;border:1px solid var(--neg);border-radius:8px;padding:16px;margin-bottom:12px;">' +
-              '<div style="color:var(--neg);font-weight:600;margin-bottom:6px;">⚠ Librerias faltantes</div>' +
-              '<div style="color:var(--fg);font-size:13px;">' + warnMsg + '</div></div>';
+        // Retry lib check up to 3 times with 1s delay to allow fallback CDNs to load
+        var retries = 0;
+        function tryCheck() {
+          if (checkLibs()) return;
+          retries++;
+          if (retries >= 3) {
+            var failed = [];
+            if (typeof window.Chart === "undefined") failed.push("Chart.js");
+            if (typeof window.luxon === "undefined") failed.push("Luxon");
+            if (!(window.Chart && window.Chart.registry && window.Chart.registry.controllers.get("candlestick"))) failed.push("Controlador de velas (chartjs-chart-financial)");
+            var warnMsg = "ATENCION: no cargaron estas librerias: " + failed.join(", ") + ". Revisa tu conexion a internet o un bloqueador de anuncios/scripts.";
+            log(warnMsg);
+            var metricsBox = $("metrics-box");
+            if (metricsBox) {
+              metricsBox.innerHTML = '<div style="background:#2d1215;border:1px solid var(--neg);border-radius:8px;padding:16px;margin-bottom:12px;">' +
+                '<div style="color:var(--neg);font-weight:600;margin-bottom:6px;">⚠ Librerias faltantes</div>' +
+                '<div style="color:var(--fg);font-size:13px;">' + warnMsg + '</div></div>';
+            }
+            return;
           }
-        } else {
-          log("Librerias de graficos (Chart.js, Luxon, velas) cargadas correctamente.");
+          setTimeout(tryCheck, 1000);
         }
+        tryCheck();
+
 
         $("download-btn").addEventListener("click", onDownload);
         $("run-backtest-btn").addEventListener("click", onRunBacktest);
@@ -2415,7 +2487,8 @@
 
         ["sweep-atr-from", "sweep-atr-to", "sweep-atr-step",
           "sweep-rr-from", "sweep-rr-to", "sweep-rr-step",
-          "sweep-adx-from", "sweep-adx-to", "sweep-adx-step"].forEach(id => {
+          "sweep-adx-from", "sweep-adx-to", "sweep-adx-step",
+          "sweep-ema-from", "sweep-ema-to", "sweep-ema-step"].forEach(id => {
             $(id).addEventListener("input", updateSweepComboCount);
           });
         document.querySelectorAll(".sweep-tf").forEach(cb => cb.addEventListener("change", updateSweepComboCount));
