@@ -1,0 +1,2436 @@
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Backtest Squeeze Momentum + ADX</title>
+  <script>window.__libFail = window.__libFail || []; window.__libLoaded = {};</script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.4/chart.umd.min.js"
+    onerror="window.__libFail.push('Chart.js');" onload="window.__libLoaded.chart=1;"></script>
+  <script src="https://cdn.jsdelivr.net/npm/luxon@2.5.2/build/global/luxon.min.js"
+    onerror="window.__libFail.push('Luxon');" onload="window.__libLoaded.luxon=1;"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-luxon@1.3.1/dist/chartjs-adapter-luxon.umd.min.js"
+    onerror="window.__libFail.push('chartjs-adapter-luxon');" onload="window.__libLoaded.adapter=1;"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-chart-financial@0.2.1/dist/chartjs-chart-financial.umd.min.js"
+    onerror="window.__libFail.push('chartjs-chart-financial');" onload="window.__libLoaded.financial=1;"></script>
+  <!-- CDN fallback loader: si alguna librería falló, intenta desde unpkg -->
+  <script>!function () { var f = window.__libFail || []; if (f.length) { var m = {}; f.forEach(function (n) { m[n] = 1 }); var d = document; function l(s) { var t = d.createElement('script'); t.src = s; t.async = false; d.head.appendChild(t); } if (m['Chart.js']) l('https://unpkg.com/chart.js@4.4.4/dist/chart.umd.min.js'); if (m['Luxon']) l('https://unpkg.com/luxon@2.5.2/build/global/luxon.min.js'); if (m['chartjs-adapter-luxon']) setTimeout(function () { l('https://unpkg.com/chartjs-adapter-luxon@1.3.1/dist/chartjs-adapter-luxon.umd.min.js') }, 200); if (m['chartjs-chart-financial']) setTimeout(function () { l('https://unpkg.com/chartjs-chart-financial@0.2.1/dist/chartjs-chart-financial.umd.min.js') }, 400); } }();</script>
+  <style>
+    :root {
+      --bg: #0d1117;
+      --panel: #151b23;
+      --panel-2: #1c232c;
+      --border: #262d38;
+      --fg: #e6edf3;
+      --fg-muted: #7d8590;
+      --accent: #4da3ff;
+      --pos: #3fb950;
+      --neg: #f85149;
+      --mono: "JetBrains Mono", "SF Mono", Consolas, monospace;
+      --sans: "Inter", -apple-system, "Segoe UI", sans-serif;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--fg);
+      font-family: var(--sans);
+      font-size: 13.5px;
+      line-height: 1.45;
+    }
+
+    header {
+      padding: 18px 24px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: baseline;
+      gap: 14px;
+    }
+
+    header h1 {
+      font-size: 17px;
+      margin: 0;
+      letter-spacing: .2px;
+    }
+
+    header .sub {
+      color: var(--fg-muted);
+      font-size: 12px;
+    }
+
+    .layout {
+      display: grid;
+      grid-template-columns: 320px 1fr;
+      min-height: calc(100vh - 60px);
+    }
+
+    aside {
+      border-right: 1px solid var(--border);
+      padding: 16px;
+      overflow-y: auto;
+      max-height: calc(100vh - 60px);
+    }
+
+    main {
+      padding: 18px 22px;
+      overflow-x: hidden;
+    }
+
+    .section {
+      margin-bottom: 18px;
+    }
+
+    .section-title {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: .08em;
+      color: var(--fg-muted);
+      margin-bottom: 8px;
+      font-weight: 600;
+    }
+
+    .field {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      margin-bottom: 6px;
+    }
+
+    .field label {
+      color: var(--fg);
+      font-size: 12.5px;
+    }
+
+    .field input[type=text],
+    .field input[type=number],
+    .field select {
+      background: var(--panel-2);
+      border: 1px solid var(--border);
+      color: var(--fg);
+      border-radius: 5px;
+      padding: 4px 7px;
+      width: 108px;
+      font-family: var(--mono);
+      font-size: 12.5px;
+    }
+
+    .field.wide input[type=text] {
+      width: 100%;
+    }
+
+    .field.row-full {
+      flex-direction: column;
+      align-items: stretch;
+    }
+
+    .field.row-full input {
+      width: 100%;
+    }
+
+    .checkbox-field {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      margin-bottom: 6px;
+    }
+
+    .checkbox-field input {
+      accent-color: var(--accent);
+    }
+
+    .filter-group {
+      border: 1px solid var(--border);
+      border-radius: 7px;
+      padding: 9px 10px;
+      margin-bottom: 8px;
+      background: var(--panel);
+    }
+
+    .filter-group summary {
+      cursor: pointer;
+      font-size: 12.5px;
+      font-weight: 600;
+    }
+
+    .filter-group[open] summary {
+      margin-bottom: 8px;
+    }
+
+    .filter-sub {
+      padding-left: 4px;
+    }
+
+    button {
+      background: var(--panel-2);
+      border: 1px solid var(--border);
+      color: var(--fg);
+      border-radius: 6px;
+      padding: 8px 12px;
+      cursor: pointer;
+      font-size: 12.5px;
+      font-weight: 500;
+      width: 100%;
+      margin-top: 6px;
+      transition: background .15s;
+    }
+
+    button:hover:not(:disabled) {
+      background: #232b36;
+    }
+
+    button.primary {
+      background: var(--accent);
+      color: #06131f;
+      border-color: var(--accent);
+      font-weight: 600;
+    }
+
+    button.primary:hover:not(:disabled) {
+      background: #6bb4ff;
+    }
+
+    button:disabled {
+      opacity: .4;
+      cursor: not-allowed;
+    }
+
+    #download-status,
+    #sweep-status {
+      font-size: 11.5px;
+      color: var(--fg-muted);
+      margin-top: 6px;
+      min-height: 16px;
+    }
+
+    .tabs {
+      display: flex;
+      gap: 4px;
+      border-bottom: 1px solid var(--border);
+      margin-bottom: 16px;
+    }
+
+    .tab-btn {
+      background: transparent;
+      border: none;
+      width: auto;
+      margin: 0;
+      border-radius: 6px 6px 0 0;
+      padding: 8px 16px;
+      color: var(--fg-muted);
+      border-bottom: 2px solid transparent;
+    }
+
+    .tab-btn.active {
+      color: var(--fg);
+      border-bottom-color: var(--accent);
+      background: var(--panel);
+    }
+
+    .tab-panel {
+      display: none;
+    }
+
+    .tab-panel.active {
+      display: block;
+    }
+
+    #metrics-box {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+      gap: 10px;
+      margin-bottom: 18px;
+    }
+
+    .metric-card {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px 12px;
+    }
+
+    .metric-label {
+      font-size: 10.5px;
+      color: var(--fg-muted);
+      text-transform: uppercase;
+      letter-spacing: .05em;
+    }
+
+    .metric-value {
+      font-family: var(--mono);
+      font-size: 17px;
+      margin-top: 3px;
+    }
+
+    .metric-value.pos {
+      color: var(--pos);
+    }
+
+    .metric-value.neg {
+      color: var(--neg);
+    }
+
+    .chart-box {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px;
+      margin-bottom: 16px;
+      height: 320px;
+      position: relative;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 12px;
+      font-family: var(--mono);
+      white-space: nowrap;
+    }
+
+    thead th {
+      position: sticky;
+      top: 0;
+      background: var(--panel-2);
+      text-align: left;
+      padding: 7px 8px;
+      border-bottom: 1px solid var(--border);
+      color: var(--fg-muted);
+      font-weight: 500;
+      cursor: pointer;
+      user-select: none;
+    }
+
+    thead th:hover {
+      color: var(--fg);
+    }
+
+    tbody td {
+      padding: 6px 8px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    tbody tr.row-win td:nth-child(7) {
+      color: var(--pos);
+    }
+
+    tbody tr.row-loss td:nth-child(7) {
+      color: var(--neg);
+    }
+
+    .pos {
+      color: var(--pos);
+    }
+
+    .neg {
+      color: var(--neg);
+    }
+
+    .table-wrap {
+      max-height: 420px;
+      overflow: auto;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      margin-bottom: 14px;
+    }
+
+    .muted {
+      color: var(--fg-muted);
+      padding: 10px;
+    }
+
+    .sweep-lists {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      margin-bottom: 10px;
+    }
+
+    .sweep-tfs {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px 12px;
+    }
+
+    .sweep-tfs label {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      font-size: 12px;
+    }
+
+    .range-row {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+
+    .range-row span {
+      font-size: 11.5px;
+      color: var(--fg-muted);
+    }
+
+    .range-row input {
+      width: 72px !important;
+    }
+
+    #sweep-progress-box {
+      margin-top: 8px;
+    }
+
+    .progress-track {
+      background: var(--panel-2);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      height: 10px;
+      overflow: hidden;
+    }
+
+    .progress-fill {
+      height: 100%;
+      width: 0%;
+      background: var(--accent);
+      transition: width .12s linear;
+    }
+
+    #console-log {
+      background: #05080d;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px;
+      font-family: var(--mono);
+      font-size: 11.5px;
+      color: #8b96a3;
+      height: 130px;
+      overflow-y: auto;
+      white-space: pre-wrap;
+      margin-top: 16px;
+    }
+
+    .flex-row {
+      display: flex;
+      gap: 8px;
+    }
+
+    .flex-row button {
+      width: auto;
+      flex: 1;
+    }
+
+    .note {
+      font-size: 11px;
+      color: var(--fg-muted);
+      margin-top: 4px;
+      line-height: 1.4;
+    }
+  </style>
+</head>
+
+<body>
+  <header>
+    <h1>Backtest &amp; Barrido — Squeeze Momentum [EMA] + ADX</h1>
+    <span class="sub">Portado del bot Python a HTML/JS · sin trading en vivo</span>
+  </header>
+
+  <div class="layout">
+    <aside>
+      <div class="section">
+        <div class="section-title">Datos</div>
+        <div class="field">
+          <label>Fuente</label>
+          <select id="data-source">
+            <option value="binance">Binance</option>
+            <option value="bingx">BingX</option>
+            <option value="yahoo">Yahoo Finance (yfinance)</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>Símbolo</label>
+          <input type="text" id="symbol" value="BTCUSDT">
+        </div>
+        <div class="field">
+          <label>Timeframe</label>
+          <select id="timeframe">
+            <option>1m</option>
+            <option>3m</option>
+            <option>5m</option>
+            <option selected>15m</option>
+            <option>30m</option>
+            <option value="1h">1h</option>
+            <option value="2h">2h</option>
+            <option value="4h">4h</option>
+            <option value="6h">6h</option>
+            <option value="8h">8h</option>
+            <option value="12h">12h</option>
+            <option value="1d">1d</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>Nº velas</label>
+          <input type="number" id="n-candles" value="1500" min="210" max="20000">
+        </div>
+        <div class="field" id="cors-proxy-row" style="display:none;">
+          <label>Proxy CORS</label>
+          <input type="text" id="cors-proxy" placeholder="https://corsproxy.io/?">
+        </div>
+        <p class="note" id="yahoo-note" style="display:none;">
+          Yahoo Finance suele bloquear CORS desde el navegador. Si la descarga falla,
+          poné delante una URL de proxy CORS (ej. <code>https://corsproxy.io/?</code>).
+          Símbolo por defecto: oro futuros <code>GC=F</code>.
+        </p>
+        <button class="primary" id="download-btn">Descargar velas</button>
+        <div id="download-status"></div>
+      </div>
+
+      <div class="section">
+        <div class="section-title">Backtest</div>
+        <div class="field"><label>Capital inicial</label><input type="number" id="capital-inicial" value="1000"></div>
+        <div class="field"><label>Riesgo por op. (%)</label><input type="number" id="riesgo-pct" value="10" step="0.5">
+        </div>
+        <div class="field"><label>Comisión (%)</label><input type="number" id="fee-pct" value="0.05" step="0.01"></div>
+        <div class="field"><label>Periodo ATR</label><input type="number" id="atr-period" value="14"></div>
+        <div class="field"><label>Mult. ATR (SL)</label><input type="number" id="atr-mult" value="1.9" step="0.1"></div>
+        <div class="field"><label>Ratio R:R</label><input type="number" id="rr-ratio" value="2.0" step="0.1"></div>
+        <div class="checkbox-field"><input type="checkbox" id="close-on-opposite" checked><label
+            for="close-on-opposite">Cerrar en señal opuesta</label></div>
+      </div>
+
+      <div class="section">
+        <div class="section-title">Filtros</div>
+
+        <details class="filter-group" open>
+          <summary>EMAs (tendencia)</summary>
+          <div class="filter-sub">
+            <div class="checkbox-field"><input type="checkbox" id="ema20-enabled"><label
+                for="ema20-enabled">EMA20</label>
+              <input type="number" id="ema20-period" value="20" style="width:60px;margin-left:auto;">
+            </div>
+            <div class="checkbox-field"><input type="checkbox" id="ema50-enabled" checked><label
+                for="ema50-enabled">EMA50</label>
+              <input type="number" id="ema50-period" value="50" style="width:60px;margin-left:auto;">
+            </div>
+            <div class="checkbox-field"><input type="checkbox" id="ema200-enabled"><label
+                for="ema200-enabled">EMA200</label>
+              <input type="number" id="ema200-period" value="200" style="width:60px;margin-left:auto;">
+            </div>
+          </div>
+        </details>
+
+        <details class="filter-group" open>
+          <summary>ADX (fuerza de tendencia)</summary>
+          <div class="filter-sub">
+            <div class="checkbox-field"><input type="checkbox" id="adx-enabled" checked><label
+                for="adx-enabled">Activar</label></div>
+            <div class="field"><label>Periodo</label><input type="number" id="adx-period" value="14"
+                style="width:70px;"></div>
+            <div class="field"><label>Nivel clave</label><input type="number" id="adx-level" value="23"
+                style="width:70px;"></div>
+          </div>
+        </details>
+
+        <details class="filter-group" open>
+          <summary>Momentum EMA / Squeeze Dots</summary>
+          <div class="filter-sub">
+            <div class="checkbox-field"><input type="checkbox" id="momentum-enabled" checked><label
+                for="momentum-enabled">Momentum EMA</label></div>
+            <div class="checkbox-field"><input type="checkbox" id="dots-enabled" checked><label
+                for="dots-enabled">Squeeze Dots</label></div>
+            <div class="field"><label>Modo dots</label>
+              <select id="dots-mode" style="width:120px;">
+                <option value="independiente">Independiente</option>
+                <option value="filtro">Filtro</option>
+              </select>
+            </div>
+          </div>
+        </details>
+
+        <details class="filter-group">
+          <summary>Bollinger Bands</summary>
+          <div class="filter-sub">
+            <div class="checkbox-field"><input type="checkbox" id="bb-enabled"><label for="bb-enabled">Activar (como
+                gatillo)</label></div>
+            <div class="field"><label>Periodo</label><input type="number" id="bb-period" value="20" style="width:70px;">
+            </div>
+            <div class="field"><label>Mult.</label><input type="number" id="bb-mult" value="2.0" step="0.1"
+                style="width:70px;"></div>
+            <div class="checkbox-field"><input type="checkbox" id="bbwidth-enabled"><label for="bbwidth-enabled">Filtro
+                ancho BB (percentil)</label></div>
+            <div class="field"><label>Min %</label><input type="number" id="bbwidth-min" value="30" style="width:70px;">
+            </div>
+            <div class="field"><label>Max %</label><input type="number" id="bbwidth-max" value="70" style="width:70px;">
+            </div>
+          </div>
+        </details>
+
+        <details class="filter-group">
+          <summary>Sesión / ATR%</summary>
+          <div class="filter-sub">
+            <div class="field"><label>Sesión (UTC)</label>
+              <select id="session-mode" style="width:110px;">
+                <option value="normal">Normal (24h)</option>
+                <option value="asia">Asia</option>
+                <option value="europa">Europa</option>
+                <option value="ny">Nueva York</option>
+              </select>
+            </div>
+            <div class="checkbox-field"><input type="checkbox" id="atrpct-enabled"><label for="atrpct-enabled">Filtro
+                ATR% mínimo</label></div>
+            <div class="field"><label>ATR% mín.</label><input type="number" id="atrpct-min" value="0.8" step="0.1"
+                style="width:70px;"></div>
+          </div>
+        </details>
+
+        <details class="filter-group">
+          <summary>Fractales (solo visual)</summary>
+          <div class="filter-sub">
+            <div class="checkbox-field"><input type="checkbox" id="fractal-fast-enabled"><label
+                for="fractal-fast-enabled">Rápido</label>
+              L<input type="number" id="fractal-fast-left" value="14" style="width:44px;margin-left:4px;">
+              R<input type="number" id="fractal-fast-right" value="1" style="width:44px;margin-left:4px;"></div>
+            <div class="checkbox-field"><input type="checkbox" id="fractal-slow-enabled"><label
+                for="fractal-slow-enabled">Lento</label>
+              L<input type="number" id="fractal-slow-left" value="40" style="width:44px;margin-left:4px;">
+              R<input type="number" id="fractal-slow-right" value="1" style="width:44px;margin-left:4px;"></div>
+            <div class="checkbox-field"><input type="checkbox" id="fractal-push-enabled"><label
+                for="fractal-push-enabled">Filtro push (solo último de la racha)</label></div>
+          </div>
+        </details>
+      </div>
+
+      <button class="primary" id="run-backtest-btn" disabled>Ejecutar Backtest</button>
+
+      <div id="console-log"></div>
+    </aside>
+
+    <main>
+      <div class="tabs">
+        <button class="tab-btn active" data-tab="tab-backtest">Backtest</button>
+        <button class="tab-btn" data-tab="tab-sweep">Barrido</button>
+      </div>
+
+      <div class="tab-panel active" id="tab-backtest">
+        <div id="metrics-box">
+          <p class="muted">Descarga velas y ejecuta un backtest para ver resultados.</p>
+        </div>
+        <div class="chart-box" style="height:420px;"><canvas id="price-chart"></canvas></div>
+        <div class="chart-box" style="height:220px;"><canvas id="equity-chart"></canvas></div>
+        <div class="flex-row" style="margin-bottom:8px;">
+          <button id="export-trades-btn" disabled>Exportar operaciones (CSV)</button>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>Lado</th>
+                <th>Entrada</th>
+                <th>Salida</th>
+                <th>P.entrada</th>
+                <th>P.salida</th>
+                <th>PnL</th>
+                <th>PnL %</th>
+                <th>Motivo</th>
+                <th>Fuente</th>
+              </tr>
+            </thead>
+            <tbody id="trades-tbody">
+              <tr>
+                <td colspan="10" class="muted">Sin operaciones.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="tab-panel" id="tab-sweep">
+        <div class="sweep-lists">
+          <div class="field row-full">
+            <label>Mult. ATR (SL)</label>
+            <div class="range-row">
+              <span>desde</span><input type="number" step="0.1" id="sweep-atr-from" value="1.0">
+              <span>hasta</span><input type="number" step="0.1" id="sweep-atr-to" value="2.7">
+              <span>cada</span><input type="number" step="0.1" id="sweep-atr-step" value="0.1">
+            </div>
+          </div>
+          <div class="field row-full">
+            <label>Ratio R:R</label>
+            <div class="range-row">
+              <span>desde</span><input type="number" step="0.1" id="sweep-rr-from" value="2.3">
+              <span>hasta</span><input type="number" step="0.1" id="sweep-rr-to" value="2.8">
+              <span>cada</span><input type="number" step="0.1" id="sweep-rr-step" value="0.1">
+            </div>
+          </div>
+          <div class="field row-full">
+            <label>Niveles ADX</label>
+            <div class="range-row">
+              <span>desde</span><input type="number" step="1" id="sweep-adx-from" value="16">
+              <span>hasta</span><input type="number" step="1" id="sweep-adx-to" value="32">
+              <span>cada</span><input type="number" step="1" id="sweep-adx-step" value="2">
+            </div>
+          </div>
+          <div id="sweep-combo-count" class="muted" style="font-size:11.5px;"></div>
+          <div>
+            <label style="font-size:12px;color:var(--fg-muted);">Temporalidades a barrer</label>
+            <div class="sweep-tfs">
+              <label><input type="checkbox" class="sweep-tf" value="1m">1m</label>
+              <label><input type="checkbox" class="sweep-tf" value="5m">5m</label>
+              <label><input type="checkbox" class="sweep-tf" value="15m" checked>15m</label>
+              <label><input type="checkbox" class="sweep-tf" value="1h" checked>1h</label>
+              <label><input type="checkbox" class="sweep-tf" value="2h">2h</label>
+              <label><input type="checkbox" class="sweep-tf" value="4h">4h</label>
+            </div>
+          </div>
+        </div>
+        <button class="primary" id="run-sweep-btn" disabled>Ejecutar Barrido</button>
+        <div id="sweep-progress-box" style="display:none;">
+          <div class="progress-track">
+            <div id="sweep-progress-fill" class="progress-fill"></div>
+          </div>
+        </div>
+        <div id="sweep-status"></div>
+        <div class="flex-row" style="margin:10px 0 8px;">
+          <button id="export-sweep-btn" disabled>Exportar resultados (CSV)</button>
+          <button id="sweep-charts-btn" disabled>Gráficos</button>
+        </div>
+        <div id="sweep-charts-box" style="display:none;">
+          <div class="chart-box"><canvas id="pf-vs-adx-chart"></canvas></div>
+          <div class="chart-box"><canvas id="pf-vs-atrmult-chart"></canvas></div>
+          <div class="chart-box"><canvas id="pf-vs-rr-chart"></canvas></div>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr id="sweep-thead-row">
+                <th data-key="timeframe" data-type="str">TF</th>
+                <th data-key="atrMult" data-type="num">Mult.ATR</th>
+                <th data-key="rrRatio" data-type="num">R:R</th>
+                <th data-key="adxLevel" data-type="num">ADX</th>
+                <th data-key="retornoPct" data-type="num">Retorno %</th>
+                <th data-key="finalCapital" data-type="num">Capital final</th>
+                <th data-key="profitFactor" data-type="num">Profit Factor</th>
+                <th data-key="weeklyPct" data-type="num">% semanal ganado</th>
+                <th data-key="winratePct" data-type="num">Winrate %</th>
+                <th data-key="nTrades" data-type="num">Trades</th>
+                <th data-key="wins" data-type="num">Wins</th>
+                <th data-key="losses" data-type="num">Losses</th>
+                <th data-key="avgWinPct" data-type="num">Ganancia prom. %</th>
+                <th data-key="avgLossPct" data-type="num">Pérdida prom. %</th>
+                <th data-key="bestTradePct" data-type="num">Mejor trade %</th>
+                <th data-key="worstSlPct" data-type="num">Peor SL %</th>
+                <th data-key="maxDdPct" data-type="num">Max DD %</th>
+                <th data-key="maxConsecutiveLosses" data-type="num">Racha perd.</th>
+                <th data-key="tradingDurationMs" data-type="num">Duración</th>
+              </tr>
+            </thead>
+            <tbody id="sweep-tbody">
+              <tr>
+                <td colspan="19" class="muted">Sin resultados.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <!-- scripts -->
+  <script id="src-indicators">// indicators.js — port de indicators.py
+    // Todas las funciones trabajan sobre arrays paralelos (open/high/low/close)
+    // ordenados cronologicamente (la vela mas antigua primero), igual que en Python.
+
+    (function (global) {
+      "use strict";
+
+      function isNum(x) { return typeof x === "number" && !Number.isNaN(x); }
+
+      // --- EWM genérico (equivalente a pandas .ewm(..., adjust=False).mean()) ---
+      function ewm(arr, alpha) {
+        const out = new Array(arr.length).fill(NaN);
+        let prev = null;
+        for (let i = 0; i < arr.length; i++) {
+          const x = arr[i];
+          if (!isNum(x)) { out[i] = prev === null ? NaN : prev; continue; }
+          prev = prev === null ? x : alpha * x + (1 - alpha) * prev;
+          out[i] = prev;
+        }
+        return out;
+      }
+      function ema(arr, length) { return ewm(arr, 2 / (length + 1)); }
+      function rma(arr, length) { return ewm(arr, 1 / length); }
+
+      // --- Rolling helpers ---
+      function rollingMean(arr, length) {
+        const out = new Array(arr.length).fill(NaN);
+        let sum = 0, count = 0;
+        const q = [];
+        for (let i = 0; i < arr.length; i++) {
+          q.push(arr[i]);
+          sum += isNum(arr[i]) ? arr[i] : 0;
+          count++;
+          if (count > length) { const rm = q.shift(); sum -= isNum(rm) ? rm : 0; count--; }
+          if (i + 1 >= length) out[i] = sum / length;
+        }
+        return out;
+      }
+      function rollingStd(arr, length) {
+        const out = new Array(arr.length).fill(NaN);
+        for (let i = 0; i < arr.length; i++) {
+          if (i + 1 < length) continue;
+          let sum = 0;
+          for (let j = i - length + 1; j <= i; j++) sum += arr[j];
+          const mean = sum / length;
+          let sq = 0;
+          for (let j = i - length + 1; j <= i; j++) sq += (arr[j] - mean) ** 2;
+          out[i] = Math.sqrt(sq / length);
+        }
+        return out;
+      }
+      function rollingMax(arr, length) {
+        const out = new Array(arr.length).fill(NaN);
+        for (let i = 0; i < arr.length; i++) {
+          if (i + 1 < length) continue;
+          let m = -Infinity;
+          for (let j = i - length + 1; j <= i; j++) if (arr[j] > m) m = arr[j];
+          out[i] = m;
+        }
+        return out;
+      }
+      function rollingMin(arr, length) {
+        const out = new Array(arr.length).fill(NaN);
+        for (let i = 0; i < arr.length; i++) {
+          if (i + 1 < length) continue;
+          let m = Infinity;
+          for (let j = i - length + 1; j <= i; j++) if (arr[j] < m) m = arr[j];
+          out[i] = m;
+        }
+        return out;
+      }
+      function diff(arr) {
+        const out = [NaN];
+        for (let i = 1; i < arr.length; i++) out.push(arr[i] - arr[i - 1]);
+        return out;
+      }
+      function ffill(arr) {
+        const out = arr.slice();
+        let last = NaN;
+        for (let i = 0; i < out.length; i++) {
+          if (isNum(out[i])) last = out[i]; else out[i] = last;
+        }
+        return out;
+      }
+
+      // --- True Range / ATR ---
+      function trueRange(highs, lows, closes) {
+        const out = new Array(highs.length).fill(NaN);
+        for (let i = 0; i < highs.length; i++) {
+          const hl = highs[i] - lows[i];
+          if (i === 0) { out[i] = hl; continue; }
+          const pc = closes[i - 1];
+          const hc = Math.abs(highs[i] - pc);
+          const lc = Math.abs(lows[i] - pc);
+          out[i] = Math.max(hl, hc, lc);
+        }
+        return out;
+      }
+      function atr(highs, lows, closes, period) {
+        return rma(trueRange(highs, lows, closes), period);
+      }
+
+      // --- ADX (Wilder) ---
+      function adx(highs, lows, closes, length) {
+        const up = diff(highs);
+        const downRaw = diff(lows).map(v => -v);
+        const n = highs.length;
+        const plusDM = new Array(n).fill(0);
+        const minusDM = new Array(n).fill(0);
+        for (let i = 0; i < n; i++) {
+          const u = up[i], d = downRaw[i];
+          plusDM[i] = (u > d && u > 0) ? u : 0;
+          minusDM[i] = (d > u && d > 0) ? d : 0;
+        }
+        const tr = trueRange(highs, lows, closes);
+        const trRma = rma(tr, length);
+
+        let plusDI = rma(plusDM, length).map((v, i) => 100 * v / trRma[i]);
+        let minusDI = rma(minusDM, length).map((v, i) => 100 * v / trRma[i]);
+        plusDI = ffill(plusDI.map(v => Number.isFinite(v) ? v : NaN));
+        minusDI = ffill(minusDI.map(v => Number.isFinite(v) ? v : NaN));
+
+        const dx = new Array(n).fill(NaN);
+        for (let i = 0; i < n; i++) {
+          const sumDI = plusDI[i] + minusDI[i];
+          const denom = sumDI === 0 ? 1 : sumDI;
+          dx[i] = 100 * Math.abs(plusDI[i] - minusDI[i]) / denom;
+        }
+        const adxVal = rma(dx, length);
+        return { plusDI, minusDI, adx: adxVal };
+      }
+
+      // --- linreg (ta.linreg) ---
+      function linreg(arr, length, offset) {
+        offset = offset || 0;
+        const out = new Array(arr.length).fill(NaN);
+        const xMean = (length - 1) / 2;
+        let denom = 0;
+        for (let x = 0; x < length; x++) denom += (x - xMean) ** 2;
+        for (let i = 0; i < arr.length; i++) {
+          if (i + 1 < length) continue;
+          let ok = true;
+          for (let j = i - length + 1; j <= i; j++) if (!isNum(arr[j])) { ok = false; break; }
+          if (!ok) continue;
+          let yMean = 0;
+          for (let j = i - length + 1; j <= i; j++) yMean += arr[j];
+          yMean /= length;
+          let slopeNum = 0;
+          for (let x = 0; x < length; x++) slopeNum += (x - xMean) * (arr[i - length + 1 + x] - yMean);
+          const slope = slopeNum / denom;
+          const intercept = yMean - slope * xMean;
+          out[i] = intercept + slope * (length - 1 - offset);
+        }
+        return out;
+      }
+
+      // --- Squeeze Momentum [EMA] ---
+      function squeezeMomentum(candles, opts) {
+        opts = opts || {};
+        const length = opts.length || 20, mult = opts.mult || 2.0;
+        const lengthKC = opts.length_kc || 20, multKC = opts.mult_kc || 1.5;
+        const useTR = opts.use_true_range !== false;
+
+        const closes = candles.map(c => c.c), highs = candles.map(c => c.h), lows = candles.map(c => c.l);
+        const n = closes.length;
+
+        const basis = ema(closes, length);
+        const stdevArr = rollingStd(closes, length);
+        const upperBB = basis.map((b, i) => b + mult * stdevArr[i]);
+        const lowerBB = basis.map((b, i) => b - mult * stdevArr[i]);
+
+        const ma = ema(closes, lengthKC);
+        const range1 = useTR ? trueRange(highs, lows, closes) : highs.map((h, i) => h - lows[i]);
+        const rangema = ema(range1, lengthKC);
+        const upperKC = ma.map((m, i) => m + rangema[i] * multKC);
+        const lowerKC = ma.map((m, i) => m - rangema[i] * multKC);
+
+        const sqzOn = new Array(n), sqzOff = new Array(n), noSqz = new Array(n);
+        for (let i = 0; i < n; i++) {
+          sqzOn[i] = lowerBB[i] > lowerKC[i] && upperBB[i] < upperKC[i];
+          sqzOff[i] = lowerBB[i] < lowerKC[i] && upperBB[i] > upperKC[i];
+          noSqz[i] = !sqzOn[i] && !sqzOff[i];
+        }
+
+        const highestHigh = rollingMax(highs, lengthKC);
+        const lowestLow = rollingMin(lows, lengthKC);
+        const emaKC = ema(closes, lengthKC);
+        const srcArr = new Array(n);
+        for (let i = 0; i < n; i++) {
+          const avgHL = (highestHigh[i] + lowestLow[i]) / 2;
+          const avgWithEma = (avgHL + emaKC[i]) / 2;
+          srcArr[i] = closes[i] - avgWithEma;
+        }
+        const val = linreg(srcArr, lengthKC, 0);
+
+        const color = new Array(n).fill(null);
+        for (let i = 0; i < n; i++) {
+          if (!isNum(val[i])) { color[i] = null; continue; }
+          const prev = (i > 0 && isNum(val[i - 1])) ? val[i - 1] : 0.0;
+          if (val[i] > 0) color[i] = val[i] > prev ? "lime" : "green";
+          else color[i] = val[i] < prev ? "red" : "maroon";
+        }
+
+        const dotColor = new Array(n);
+        for (let i = 0; i < n; i++) dotColor[i] = sqzOn[i] ? "black" : (sqzOff[i] ? "gray" : "blue");
+
+        return { val, color, sqzOn, sqzOff, noSqz, dotColor };
+      }
+
+      function momentumTrigger(color) {
+        const n = color.length;
+        const trig = new Array(n).fill(null);
+        for (let i = 1; i < n; i++) {
+          const prev = color[i - 1], cur = color[i];
+          if (prev === "red" && cur === "maroon") trig[i] = "BUY";
+          else if (prev === "lime" && cur === "green") trig[i] = "SELL";
+        }
+        return trig;
+      }
+
+      function dotTrigger(dotColor, momColor) {
+        const n = dotColor.length;
+        const trig = new Array(n).fill(null);
+        for (let i = 1; i < n; i++) {
+          const released = dotColor[i - 1] === "black" && dotColor[i] === "gray";
+          if (!released) continue;
+          const bullish = momColor[i] === "lime" || momColor[i] === "green";
+          const bearish = momColor[i] === "red" || momColor[i] === "maroon";
+          if (bullish) trig[i] = "BUY";
+          else if (bearish) trig[i] = "SELL";
+        }
+        return trig;
+      }
+
+      function atrPercent(highs, lows, closes, period) {
+        const a = atr(highs, lows, closes, period);
+        return a.map((v, i) => (closes[i] ? (v / closes[i]) * 100 : NaN));
+      }
+
+      function bollingerBands(closes, period, mult) {
+        const basis = rollingMean(closes, period);
+        const std = rollingStd(closes, period);
+        const upper = basis.map((b, i) => b + mult * std[i]);
+        const lower = basis.map((b, i) => b - mult * std[i]);
+        return { basis, upper, lower };
+      }
+      function bollingerBandWidth(bb) {
+        return bb.basis.map((b, i) => (b ? (bb.upper[i] - bb.lower[i]) / b * 100 : NaN));
+      }
+      function bollingerBandWidthPercentile(width, lookback) {
+        lookback = lookback || 100;
+        const minPeriods = Math.max(10, Math.floor(lookback / 5));
+        const n = width.length;
+        const out = new Array(n).fill(NaN);
+        for (let i = 0; i < n; i++) {
+          const start = Math.max(0, i - lookback + 1);
+          const windowArr = width.slice(start, i + 1);
+          if (windowArr.length < minPeriods) continue;
+          const current = width[i];
+          if (!isNum(current)) continue;
+          const valid = windowArr.filter(isNum);
+          if (valid.length < 2) continue;
+          const count = valid.filter(v => v < current).length;
+          out[i] = (count / (valid.length - 1)) * 100;
+        }
+        return out;
+      }
+
+      // --- Fractales (Bill Williams) — solo visual ---
+      function fractals(highs, lows, left, right) {
+        const n = highs.length;
+        const up = new Array(n).fill(false);
+        const down = new Array(n).fill(false);
+        left = Math.max(0, left | 0); right = Math.max(0, right | 0);
+        if (n > left + right && (left + right) > 0) {
+          for (let t = left; t < n - right; t++) {
+            let hMax = -Infinity, lMin = Infinity, bad = false;
+            for (let j = t - left; j <= t + right; j++) {
+              if (!isNum(highs[j]) || !isNum(lows[j])) { bad = true; break; }
+              if (highs[j] > hMax) hMax = highs[j];
+              if (lows[j] < lMin) lMin = lows[j];
+            }
+            if (bad) continue;
+            if (highs[t] === hMax) up[t] = true;
+            if (lows[t] === lMin) down[t] = true;
+          }
+        }
+        return { up, down };
+      }
+
+      function applyPushFilter(up, down) {
+        const n = up.length;
+        const u = up.slice(), d = down.slice();
+        let lastSide = 0, lastPos = -1;
+        for (let t = 0; t < n; t++) {
+          let isTop = u[t], isBot = d[t];
+          if (!isTop && !isBot) continue;
+          if (isTop && isBot) { d[t] = false; isBot = false; }
+          const side = isTop ? 1 : -1;
+          if (lastSide === side && lastPos !== -1) {
+            if (lastSide === 1) u[lastPos] = false; else d[lastPos] = false;
+          }
+          lastSide = side; lastPos = t;
+        }
+        return { up: u, down: d };
+      }
+
+      // --- Cálculo integral de todos los indicadores ---
+      function computeAll(candles, params) {
+        const closes = candles.map(c => c.c), highs = candles.map(c => c.h), lows = candles.map(c => c.l);
+
+        const out = { candles, closes, highs, lows };
+
+        out.ema20 = ema(closes, params.ema20.period);
+        out.ema50 = ema(closes, params.ema50.period);
+        out.ema200 = ema(closes, params.ema200.period);
+
+        const adxRes = adx(highs, lows, closes, params.adx.period);
+        out.adx = adxRes.adx; out.plusDI = adxRes.plusDI; out.minusDI = adxRes.minusDI;
+
+        const sqz = squeezeMomentum(candles, {
+          length: params.sqz_length, mult: params.sqz_mult,
+          length_kc: params.sqz_length_kc, mult_kc: params.sqz_mult_kc,
+          use_true_range: params.sqz_use_tr,
+        });
+        out.momVal = sqz.val;
+        out.momColor = sqz.color;
+        out.momTrigger = momentumTrigger(sqz.color);
+        out.dotColor = sqz.dotColor;
+        out.dotTrigger = dotTrigger(sqz.dotColor, sqz.color);
+
+        const bb = bollingerBands(closes, params.bb.period, params.bb.mult);
+        out.bbBasis = bb.basis; out.bbUpper = bb.upper; out.bbLower = bb.lower;
+        out.bbWidth = bollingerBandWidth(bb);
+        out.bbWidthPct = bollingerBandWidthPercentile(out.bbWidth, 100);
+
+        out.atrPct = atrPercent(highs, lows, closes, (params.atr_pct && params.atr_pct.period) || 14);
+
+        if (params.fractal_fast && params.fractal_fast.enabled) {
+          let fr = fractals(highs, lows, params.fractal_fast.left, params.fractal_fast.right);
+          if (params.fractal_push && params.fractal_push.enabled) fr = applyPushFilter(fr.up, fr.down);
+          out.fractalFastUp = fr.up; out.fractalFastDown = fr.down;
+        }
+        if (params.fractal_slow && params.fractal_slow.enabled) {
+          let fr = fractals(highs, lows, params.fractal_slow.left, params.fractal_slow.right);
+          if (params.fractal_push && params.fractal_push.enabled) fr = applyPushFilter(fr.up, fr.down);
+          out.fractalSlowUp = fr.up; out.fractalSlowDown = fr.down;
+        }
+
+        return out;
+      }
+
+      global.Indicators = {
+        ema, rma, rollingMean, rollingStd, rollingMax, rollingMin, trueRange, atr, adx,
+        linreg, squeezeMomentum, momentumTrigger, dotTrigger, atrPercent,
+        bollingerBands, bollingerBandWidth, bollingerBandWidthPercentile,
+        fractals, applyPushFilter, computeAll,
+      };
+    })(typeof window !== "undefined" ? window : globalThis);
+  </script>
+  <script id="src-strategy">// strategy.js — port de strategy.py
+
+    (function (global) {
+      "use strict";
+
+      const SESSION_HOURS_UTC = { asia: [0, 9], europa: [7, 16], ny: [12, 21] };
+
+      function sessionMask(candles, mode) {
+        const n = candles.length;
+        if (!SESSION_HOURS_UTC[mode]) return new Array(n).fill(true);
+        const [start, end] = SESSION_HOURS_UTC[mode];
+        return candles.map(c => {
+          const h = new Date(c.t).getUTCHours();
+          return h >= start && h < end;
+        });
+      }
+
+      function trendMasks(data, params) {
+        const n = data.closes.length;
+        const bull = new Array(n).fill(true);
+        const bear = new Array(n).fill(true);
+        for (let i = 0; i < n; i++) {
+          if (params.ema20.enabled) { bull[i] = bull[i] && data.closes[i] > data.ema20[i]; bear[i] = bear[i] && data.closes[i] < data.ema20[i]; }
+          if (params.ema50.enabled) { bull[i] = bull[i] && data.closes[i] > data.ema50[i]; bear[i] = bear[i] && data.closes[i] < data.ema50[i]; }
+          if (params.ema200.enabled) { bull[i] = bull[i] && data.closes[i] > data.ema200[i]; bear[i] = bear[i] && data.closes[i] < data.ema200[i]; }
+        }
+        return { bull, bear };
+      }
+
+      function computeSignals(candles, params) {
+        const data = Indicators.computeAll(candles, params);
+        const n = candles.length;
+        const { bull: bullMask, bear: bearMask } = trendMasks(data, params);
+
+        const trending = params.adx.enabled
+          ? data.adx.map(v => v > params.adx.key_level)
+          : new Array(n).fill(true);
+
+        const dotsEnabled = params.dots.enabled;
+        const dotsMode = params.dots.mode;
+
+        const sessionOk = sessionMask(candles, (params.session && params.session.mode) || "normal");
+
+        const atrOk = (params.atr_pct && params.atr_pct.enabled)
+          ? data.atrPct.map(v => (typeof v === "number" && !Number.isNaN(v)) ? v >= params.atr_pct.min_pct : false)
+          : new Array(n).fill(true);
+
+        const bbWidthOk = (params.bb_width && params.bb_width.enabled)
+          ? data.bbWidthPct.map(v => (typeof v === "number" && !Number.isNaN(v)) ? (v >= params.bb_width.min_pct && v <= params.bb_width.max_pct) : false)
+          : new Array(n).fill(true);
+
+        const momBuy = new Array(n).fill(false), momSell = new Array(n).fill(false);
+        if (params.momentum.enabled) {
+          const notBlack = (dotsEnabled && dotsMode === "filtro")
+            ? data.dotColor.map(c => c !== "black")
+            : new Array(n).fill(true);
+          for (let i = 0; i < n; i++) {
+            momBuy[i] = data.momTrigger[i] === "BUY" && bullMask[i] && trending[i] && notBlack[i] && sessionOk[i] && atrOk[i] && bbWidthOk[i];
+            momSell[i] = data.momTrigger[i] === "SELL" && bearMask[i] && trending[i] && notBlack[i] && sessionOk[i] && atrOk[i] && bbWidthOk[i];
+          }
+        }
+
+        const dotBuy = new Array(n).fill(false), dotSell = new Array(n).fill(false);
+        if (dotsEnabled && dotsMode === "independiente") {
+          for (let i = 0; i < n; i++) {
+            dotBuy[i] = data.dotTrigger[i] === "BUY" && bullMask[i] && trending[i] && sessionOk[i] && atrOk[i] && bbWidthOk[i];
+            dotSell[i] = data.dotTrigger[i] === "SELL" && bearMask[i] && trending[i] && sessionOk[i] && atrOk[i] && bbWidthOk[i];
+          }
+        }
+
+        const bbBuy = new Array(n).fill(false), bbSell = new Array(n).fill(false);
+        if (params.bb.enabled) {
+          for (let i = 0; i < n; i++) {
+            const touchLower = data.lows[i] <= data.bbLower[i];
+            const touchUpper = data.highs[i] >= data.bbUpper[i];
+            let buy = (bullMask[i] && touchLower) || (bearMask[i] && touchUpper);
+            let sell = (bullMask[i] && touchUpper) || (bearMask[i] && touchLower);
+            buy = buy && trending[i] && sessionOk[i] && atrOk[i] && bbWidthOk[i];
+            sell = sell && trending[i] && sessionOk[i] && atrOk[i] && bbWidthOk[i];
+            bbBuy[i] = buy; bbSell[i] = sell;
+          }
+        }
+
+        const signal = new Array(n).fill(null);
+        for (let i = 0; i < n; i++) {
+          const buy = momBuy[i] || dotBuy[i] || bbBuy[i];
+          const sell = momSell[i] || dotSell[i] || bbSell[i];
+          if (buy && !sell) signal[i] = "BUY";
+          else if (sell && !buy) signal[i] = "SELL";
+        }
+
+        data.signal = signal;
+        data.srcMomentumBuy = momBuy; data.srcMomentumSell = momSell;
+        data.srcDotsBuy = dotBuy; data.srcDotsSell = dotSell;
+        data.srcBbBuy = bbBuy; data.srcBbSell = bbSell;
+
+        return data;
+      }
+
+      function defaultParams() {
+        return {
+          ema20: { enabled: false, period: 20 },
+          ema50: { enabled: true, period: 50 },
+          ema200: { enabled: false, period: 200 },
+          adx: { enabled: true, period: 14, key_level: 23 },
+          momentum: { enabled: true },
+          dots: { enabled: true, mode: "independiente" },
+          bb: { enabled: false, period: 20, mult: 2.0 },
+          bb_width: { enabled: false, min_pct: 30.0, max_pct: 70.0 },
+          session: { mode: "normal" },
+          atr_pct: { enabled: false, min_pct: 0.8, period: 14 },
+          fractal_fast: { enabled: false, left: 14, right: 1 },
+          fractal_slow: { enabled: false, left: 40, right: 1 },
+          fractal_push: { enabled: false },
+          sqz_length: 20, sqz_mult: 2.0, sqz_length_kc: 20, sqz_mult_kc: 1.5, sqz_use_tr: true,
+        };
+      }
+
+      global.Strategy = { computeSignals, defaultParams, sessionMask, trendMasks };
+    })(typeof window !== "undefined" ? window : globalThis);
+  </script>
+  <script id="src-backtester">// backtester.js — port de backtester.py
+
+    (function (global) {
+      "use strict";
+
+      function openPosition(capital, sizeFraction, side, entryPrice, atrVal, atrMult, rrRatio, idx) {
+        const notional = capital * sizeFraction;
+        if (!(atrVal > 0)) atrVal = entryPrice * 0.02;
+        const riskDistance = atrVal * atrMult;
+        const rewardDistance = riskDistance * rrRatio;
+        let sl, tp;
+        if (side === "LONG") { sl = entryPrice - riskDistance; tp = entryPrice + rewardDistance; }
+        else { sl = entryPrice + riskDistance; tp = entryPrice - rewardDistance; }
+        return { side, entryPrice, notional, entryIdx: idx, sl, tp, atrAtEntry: atrVal };
+      }
+
+      function closePosition(position, exitPrice, fee) {
+        const { notional, entryPrice, side } = position;
+        let grossPnl;
+        if (side === "LONG") grossPnl = notional * (exitPrice / entryPrice - 1);
+        else grossPnl = notional * (1 - exitPrice / entryPrice);
+        const exitFee = (notional + grossPnl) * fee;
+        return grossPnl - exitFee;
+      }
+
+      function runBacktest(data, opts) {
+        const {
+          initialCapital = 1000, riskPct = 10, feePct = 0.05,
+          atrPeriod = 14, atrMult = 1.9, rrRatio = 2.0,
+          closeOnOppositeSignal = true, atrSeries = null,
+        } = opts;
+
+        const candles = data.candles;
+        const n = candles.length;
+        const opens = candles.map(c => c.o), highs = candles.map(c => c.h), lows = candles.map(c => c.l), closes = candles.map(c => c.c);
+        const signal = data.signal || new Array(n).fill(null);
+        const atrArr = atrSeries || Indicators.atr(highs, lows, closes, atrPeriod);
+
+        let capital = initialCapital;
+        let position = null;
+        const equityCurve = new Array(n).fill(0);
+        const trades = [];
+        let liquidated = false;
+        let liquidationIdx = null;
+
+        const fee = feePct / 100.0;
+        const sizeFraction = riskPct / 100.0;
+
+        let stoppedAt = n;
+
+        for (let pos = 0; pos < n; pos++) {
+          const o = opens[pos], h = highs[pos], l = lows[pos], c = closes[pos];
+          const sig = signal[pos];
+          const atrVal = atrArr[pos];
+
+          if (position !== null) {
+            const { sl, tp } = position;
+            let hitSl, hitTp;
+            if (position.side === "LONG") { hitSl = l <= sl; hitTp = h >= tp; }
+            else { hitSl = h >= sl; hitTp = l <= tp; }
+            if (hitSl || hitTp) {
+              let exitPrice, reason;
+              if (hitSl) { exitPrice = sl; reason = "SL"; }
+              else { exitPrice = tp; reason = "TP"; }
+              const pnl = closePosition(position, exitPrice, fee);
+              capital += pnl;
+              trades.push({ ...position, exitPrice, exitIdx: pos, pnl, exitReason: reason });
+              position = null;
+            }
+          }
+
+          if (sig === "BUY" || sig === "SELL") {
+            const desiredSide = sig === "BUY" ? "LONG" : "SHORT";
+            if (position === null) {
+              position = openPosition(capital, sizeFraction, desiredSide, c, atrVal, atrMult, rrRatio, pos);
+              capital -= position.notional * fee;
+            } else if (position.side !== desiredSide) {
+              if (closeOnOppositeSignal) {
+                const pnl = closePosition(position, c, fee);
+                capital += pnl;
+                trades.push({ ...position, exitPrice: c, exitIdx: pos, pnl, exitReason: "SEÑAL_INVERSA" });
+                position = openPosition(capital, sizeFraction, desiredSide, c, atrVal, atrMult, rrRatio, pos);
+                capital -= position.notional * fee;
+              }
+            }
+          }
+
+          let unrealized = 0;
+          if (position !== null) {
+            if (position.side === "LONG") unrealized = position.notional * (c / position.entryPrice - 1);
+            else unrealized = position.notional * (1 - c / position.entryPrice);
+          }
+          const equityNow = capital + unrealized;
+          equityCurve[pos] = equityNow;
+
+          if (equityNow <= 0) {
+            if (position !== null) {
+              const pnl = closePosition(position, c, fee);
+              capital += pnl;
+              trades.push({ ...position, exitPrice: c, exitIdx: pos, pnl, exitReason: "LIQUIDACION" });
+              position = null;
+            } else {
+              capital = equityNow;
+            }
+            equityCurve[pos] = capital;
+            liquidated = true;
+            liquidationIdx = pos;
+            stoppedAt = pos + 1;
+            break;
+          }
+        }
+
+        if (!liquidated && position !== null) {
+          const lastPrice = closes[n - 1];
+          const pnl = closePosition(position, lastPrice, fee);
+          capital += pnl;
+          trades.push({ ...position, exitPrice: lastPrice, exitIdx: n - 1, pnl, exitReason: "FIN_DATOS" });
+          equityCurve[n - 1] = capital;
+        }
+
+        if (liquidated) {
+          for (let i = stoppedAt; i < n; i++) equityCurve[i] = capital;
+        }
+
+        const metrics = computeMetrics(equityCurve.slice(0, n), trades, initialCapital, candles, liquidated, liquidationIdx);
+
+        return { equityCurve, trades, metrics, liquidated };
+      }
+
+      function computeMetrics(equityCurve, trades, initialCapital, candles, liquidated, liquidationIdx) {
+        if (equityCurve.length === 0) return null;
+        const finalCapital = equityCurve[equityCurve.length - 1];
+        const totalReturnPct = (finalCapital / initialCapital - 1) * 100;
+
+        const wins = trades.filter(t => t.pnl > 0);
+        const losses = trades.filter(t => t.pnl <= 0);
+        const winRate = trades.length ? (wins.length / trades.length) * 100 : 0;
+
+        let runningMax = -Infinity, maxDrawdown = 0;
+        for (const eq of equityCurve) {
+          runningMax = Math.max(runningMax, eq);
+          const dd = ((eq - runningMax) / runningMax) * 100;
+          if (dd < maxDrawdown) maxDrawdown = dd;
+        }
+
+        const exitReasonCounts = {};
+        for (const t of trades) exitReasonCounts[t.exitReason] = (exitReasonCounts[t.exitReason] || 0) + 1;
+
+        const pnlPcts = trades.map(t => t.notional ? (t.pnl / t.notional) * 100 : 0);
+        const bestTradePct = pnlPcts.length ? Math.max(...pnlPcts) : null;
+        const slPnlPcts = trades.filter(t => t.exitReason === "SL").map(t => t.notional ? (t.pnl / t.notional) * 100 : 0);
+        const worstSlPct = slPnlPcts.length ? Math.min(...slPnlPcts) : null;
+
+        const winPcts = trades.map((t, i) => t.pnl > 0 ? pnlPcts[i] : null).filter(v => v !== null);
+        const lossPcts = trades.map((t, i) => t.pnl <= 0 ? pnlPcts[i] : null).filter(v => v !== null);
+        const avgWinPct = winPcts.length ? winPcts.reduce((a, b) => a + b, 0) / winPcts.length : null;
+        const avgLossPct = lossPcts.length ? lossPcts.reduce((a, b) => a + b, 0) / lossPcts.length : null;
+
+        const grossProfit = wins.reduce((s, t) => s + t.pnl, 0);
+        const grossLoss = Math.abs(losses.reduce((s, t) => s + t.pnl, 0));
+        let profitFactor;
+        if (grossLoss > 0) profitFactor = grossProfit / grossLoss;
+        else if (grossProfit > 0) profitFactor = Infinity;
+        else profitFactor = 0;
+
+        let maxConsecutiveLosses = 0, streak = 0;
+        for (const t of trades) {
+          if (t.pnl <= 0) { streak++; maxConsecutiveLosses = Math.max(maxConsecutiveLosses, streak); }
+          else streak = 0;
+        }
+
+        let firstTradeTime = null, lastTradeTime = null, tradingDurationMs = null;
+        if (trades.length && candles.length) {
+          firstTradeTime = candles[trades[0].entryIdx].t;
+          lastTradeTime = candles[trades[trades.length - 1].exitIdx].t;
+          tradingDurationMs = lastTradeTime - firstTradeTime;
+        }
+
+        let liquidationTime = null;
+        if (liquidated && liquidationIdx !== null && candles[liquidationIdx]) liquidationTime = candles[liquidationIdx].t;
+
+        return {
+          initialCapital, finalCapital, totalReturnPct, numTrades: trades.length,
+          wins: wins.length, losses: losses.length, winRatePct: winRate, maxDrawdownPct: maxDrawdown,
+          exitReasonCounts, bestTradePct, worstSlPct, avgWinPct, avgLossPct, profitFactor,
+          maxConsecutiveLosses, firstTradeTime, lastTradeTime, tradingDurationMs,
+          liquidated, liquidationTime, liquidationCount: liquidated ? 1 : 0,
+        };
+      }
+
+      global.Backtester = { runBacktest, openPosition, closePosition, computeMetrics };
+    })(typeof window !== "undefined" ? window : globalThis);
+  </script>
+  <script id="src-sweep">// sweep.js — port de sweep_backtest.py
+
+    (function (global) {
+      "use strict";
+
+      function weeklyReturnPct(totalReturnPct, tradingDurationMs) {
+        if (!tradingDurationMs || tradingDurationMs <= 0) return null;
+        const MS_PER_WEEK = 7 * 24 * 60 * 60 * 1000;
+        const weeks = tradingDurationMs / MS_PER_WEEK;
+        if (weeks <= 0) return null;
+        const growth = 1 + totalReturnPct / 100;
+        if (growth <= 0) return -100;
+        return (Math.pow(growth, 1 / weeks) - 1) * 100;
+      }
+
+      function decimalsOf(n) {
+        const s = String(n);
+        const i = s.indexOf(".");
+        return i === -1 ? 0 : s.length - i - 1;
+      }
+
+      // Genera [from, from+step, ..., to] evitando errores de coma flotante.
+      function rangeList(from, to, step) {
+        from = Number(from); to = Number(to); step = Number(step);
+        if (!Number.isFinite(from) || !Number.isFinite(to) || !Number.isFinite(step) || step <= 0) return [];
+        const dec = Math.max(decimalsOf(step), decimalsOf(from));
+        const n = Math.round((to - from) / step);
+        if (n < 0) return [];
+        const out = [];
+        for (let i = 0; i <= n; i++) out.push(Number((from + i * step).toFixed(dec)));
+        return out;
+      }
+
+      // Corre todas las combinaciones (atrMult x rr) para UNA (temporalidad, nivel ADX).
+      // Es la unidad de trabajo que se reparte entre los Web Workers.
+      function computeGroup(task, onTick) {
+        const {
+          tf, adxLevel, candles, atrSeries, baseParams, atrMults, rrRatios,
+          atrPeriod, initialCapital, riskPct, feePct, closeOnOppositeSignal,
+        } = task;
+        const params = JSON.parse(JSON.stringify(baseParams));
+        params.adx.key_level = adxLevel;
+        const data = Strategy.computeSignals(candles, params);
+        const rows = [];
+        for (const atrMult of atrMults) {
+          for (const rr of rrRatios) {
+            const result = Backtester.runBacktest(data, {
+              initialCapital, riskPct, feePct, atrPeriod, atrMult, rrRatio: rr,
+              closeOnOppositeSignal, atrSeries,
+            });
+            if (onTick) onTick();
+            const m = result.metrics;
+            if (!m) continue;
+            rows.push({
+              timeframe: tf, atrMult, rrRatio: rr, adxLevel,
+              retornoPct: m.totalReturnPct, winratePct: m.winRatePct,
+              maxDdPct: m.maxDrawdownPct, profitFactor: m.profitFactor,
+              nTrades: m.numTrades, liquidated: m.liquidated,
+              wins: m.wins, losses: m.losses,
+              avgWinPct: m.avgWinPct, avgLossPct: m.avgLossPct,
+              maxConsecutiveLosses: m.maxConsecutiveLosses,
+              tradingDurationMs: m.tradingDurationMs,
+              bestTradePct: m.bestTradePct, worstSlPct: m.worstSlPct,
+              finalCapital: m.finalCapital,
+              weeklyPct: weeklyReturnPct(m.totalReturnPct, m.tradingDurationMs),
+            });
+          }
+        }
+        return rows;
+      }
+
+      function buildGroupTasks(opts) {
+        const { candlesByTf, baseParams, atrMults, rrRatios, adxLevels, atrPeriod = 14 } = opts;
+        const tasks = [];
+        for (const tf of Object.keys(candlesByTf)) {
+          const candles = candlesByTf[tf];
+          if (!candles || candles.length < 210) continue;
+          const highs = candles.map(c => c.h), lows = candles.map(c => c.l), closes = candles.map(c => c.c);
+          const atrSeries = Indicators.atr(highs, lows, closes, atrPeriod);
+          for (const adxLevel of adxLevels) {
+            tasks.push({
+              tf, adxLevel, candles, atrSeries, baseParams, atrMults, rrRatios,
+              atrPeriod, initialCapital: opts.initialCapital, riskPct: opts.riskPct,
+              feePct: opts.feePct, closeOnOppositeSignal: opts.closeOnOppositeSignal,
+            });
+          }
+        }
+        return tasks;
+      }
+
+      // Version secuencial (fallback si Web Workers no estan disponibles).
+      function runSweep(opts, onProgress) {
+        const tasks = buildGroupTasks(opts);
+        const total = tasks.reduce((s, t) => s + t.atrMults.length * t.rrRatios.length, 0);
+        let done = 0;
+        const rows = [];
+        for (const task of tasks) {
+          const groupRows = computeGroup(task, () => { done++; if (onProgress) onProgress(done, total); });
+          rows.push(...groupRows);
+        }
+        rows.sort((a, b) => b.retornoPct - a.retornoPct);
+        return rows;
+      }
+
+      // Version paralela: reparte las (temporalidad x nivel ADX) entre varios Web Workers
+      // (uno por núcleo de CPU disponible), acelerando el barrido de verdad y permitiendo
+      // una barra de progreso que se actualiza en tiempo real.
+      function runSweepParallel(opts, onProgress) {
+        const tasks = buildGroupTasks(opts);
+        const total = tasks.reduce((s, t) => s + t.atrMults.length * t.rrRatios.length, 0);
+
+        if (typeof Worker === "undefined" || !tasks.length) {
+          return Promise.resolve(runSweep(opts, onProgress));
+        }
+
+        return new Promise((resolve, reject) => {
+          const workerSrc = [
+            document.getElementById("src-indicators").textContent,
+            document.getElementById("src-strategy").textContent,
+            document.getElementById("src-backtester").textContent,
+            document.getElementById("src-sweep").textContent,
+            `self.onmessage = function (e) {
+            const rows = Sweep.computeGroup(e.data, function () { self.postMessage({ type: "tick" }); });
+            self.postMessage({ type: "done", rows: rows });
+          };`,
+          ].join("\n;\n");
+
+          let blobUrl;
+          try {
+            const blob = new Blob([workerSrc], { type: "text/javascript" });
+            blobUrl = URL.createObjectURL(blob);
+          } catch (err) {
+            resolve(runSweep(opts, onProgress));
+            return;
+          }
+
+          const poolSize = Math.max(1, Math.min(8, navigator.hardwareConcurrency || 4, tasks.length));
+          const queue = tasks.slice();
+          const rows = [];
+          let done = 0;
+          let finishedWorkers = 0;
+          const workers = [];
+
+          function cleanup() {
+            workers.forEach(w => w.terminate());
+            URL.revokeObjectURL(blobUrl);
+          }
+
+          function assignNext(worker) {
+            const next = queue.shift();
+            if (!next) {
+              finishedWorkers++;
+              if (finishedWorkers === workers.length) {
+                cleanup();
+                rows.sort((a, b) => b.retornoPct - a.retornoPct);
+                resolve(rows);
+              }
+              return;
+            }
+            worker.postMessage(next);
+          }
+
+          for (let i = 0; i < poolSize; i++) {
+            let worker;
+            try {
+              worker = new Worker(blobUrl);
+            } catch (err) {
+              cleanup();
+              resolve(runSweep(opts, onProgress));
+              return;
+            }
+            worker.onmessage = (e) => {
+              const msg = e.data;
+              if (msg.type === "tick") {
+                done++;
+                if (onProgress) onProgress(done, total);
+              } else if (msg.type === "done") {
+                rows.push(...msg.rows);
+                assignNext(worker);
+              }
+            };
+            worker.onerror = (err) => {
+              cleanup();
+              reject(new Error("Error en Web Worker del barrido: " + err.message));
+            };
+            workers.push(worker);
+          }
+          workers.forEach(assignNext);
+        });
+      }
+
+      global.Sweep = { runSweep, runSweepParallel, computeGroup, rangeList };
+    })(typeof window !== "undefined" ? window : globalThis);
+  </script>
+  <script>// datasources.js — descarga de velas desde Binance, BingX o Yahoo Finance
+
+    (function (global) {
+      "use strict";
+
+      const TIMEFRAMES = ["1m", "3m", "5m", "15m", "30m", "1h", "2h", "4h", "6h", "8h", "12h", "1d"];
+
+      async function fetchJson(url) {
+        const res = await fetch(url);
+        if (!res.ok) {
+          const text = await res.text().catch(() => "");
+          throw new Error(`HTTP ${res.status} en ${url} — ${text.slice(0, 200)}`);
+        }
+        return res.json();
+      }
+
+      async function fetchBinance(symbol, timeframe, limit) {
+        const sym = symbol.replace("-", "").replace("/", "").toUpperCase();
+        let all = [];
+        let endTime = null;
+        let guard = 0;
+        while (all.length < limit && guard < 50) {
+          guard++;
+          let url = `https://api.binance.com/api/v3/klines?symbol=${encodeURIComponent(sym)}&interval=${timeframe}&limit=1000`;
+          if (endTime) url += `&endTime=${endTime}`;
+          const raw = await fetchJson(url);
+          if (!raw.length) break;
+          const batch = raw.map(k => ({
+            t: k[0], o: parseFloat(k[1]), h: parseFloat(k[2]), l: parseFloat(k[3]), c: parseFloat(k[4]), v: parseFloat(k[5]),
+          }));
+          all = batch.concat(all);
+          endTime = batch[0].t - 1;
+          if (raw.length < 1000) break;
+        }
+        return all.length > limit ? all.slice(all.length - limit) : all;
+      }
+
+      async function fetchBingX(symbol, timeframe, limit) {
+        let sym = symbol.toUpperCase();
+        if (!sym.includes("-")) {
+          const m = sym.match(/^(.+?)(USDT|USDC|USD)$/);
+          sym = m ? `${m[1]}-${m[2]}` : sym;
+        }
+        let all = [];
+        let endTime = null;
+        let guard = 0;
+        while (all.length < limit && guard < 50) {
+          guard++;
+          let url = `https://open-api.bingx.com/openApi/swap/v2/quote/klines?symbol=${encodeURIComponent(sym)}&interval=${timeframe}&limit=1000`;
+          if (endTime) url += `&endTime=${endTime}`;
+          const raw = await fetchJson(url);
+          const rows = raw && raw.data ? raw.data : [];
+          if (!rows.length) break;
+          let batch = rows.map(k => ({
+            t: Number(k.time), o: parseFloat(k.open), h: parseFloat(k.high), l: parseFloat(k.low), c: parseFloat(k.close), v: parseFloat(k.volume),
+          }));
+          batch.sort((a, b) => a.t - b.t);
+          all = batch.concat(all);
+          endTime = batch[0].t - 1;
+          if (rows.length < 1000) break;
+        }
+        return all.length > limit ? all.slice(all.length - limit) : all;
+      }
+
+      const YF_INTERVAL = {
+        "1m": "1m", "5m": "5m", "15m": "15m", "30m": "30m", "1h": "60m",
+        "1d": "1d",
+      };
+      const YF_RANGE = {
+        "1m": "7d", "5m": "60d", "15m": "60d", "30m": "60d", "1h": "730d", "1d": "5y",
+      };
+
+      async function fetchYahoo(symbol, timeframe, limit, corsProxy) {
+        const interval = YF_INTERVAL[timeframe];
+        if (!interval) throw new Error(`Yahoo Finance no soporta la temporalidad ${timeframe} (usa 1m,5m,15m,30m,1h,1d).`);
+        const range = YF_RANGE[timeframe];
+        const base = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=${interval}&range=${range}`;
+        const url = corsProxy ? corsProxy + encodeURIComponent(base) : base;
+
+        let raw;
+        try {
+          raw = await fetchJson(url);
+        } catch (err) {
+          throw new Error(
+            `No se pudo obtener datos de Yahoo Finance (posible bloqueo CORS del navegador). ` +
+            `Proba activar un proxy CORS en el panel de datos. Detalle: ${err.message}`
+          );
+        }
+        const result = raw && raw.chart && raw.chart.result && raw.chart.result[0];
+        if (!result) throw new Error("Yahoo Finance no devolvio datos para ese simbolo/temporalidad.");
+        const ts = result.timestamp || [];
+        const q = result.indicators.quote[0];
+        const candles = [];
+        for (let i = 0; i < ts.length; i++) {
+          if (q.open[i] == null || q.high[i] == null || q.low[i] == null || q.close[i] == null) continue;
+          candles.push({ t: ts[i] * 1000, o: q.open[i], h: q.high[i], l: q.low[i], c: q.close[i], v: q.volume ? q.volume[i] : 0 });
+        }
+        candles.sort((a, b) => a.t - b.t);
+        return candles.slice(-limit);
+      }
+
+      async function fetchCandles(source, symbol, timeframe, limit, opts) {
+        opts = opts || {};
+        if (source === "binance") return fetchBinance(symbol, timeframe, limit);
+        if (source === "bingx") return fetchBingX(symbol, timeframe, limit);
+        if (source === "yahoo") return fetchYahoo(symbol, timeframe, limit, opts.corsProxy);
+        throw new Error("Fuente de datos desconocida: " + source);
+      }
+
+      global.DataSources = { fetchCandles, TIMEFRAMES, YF_INTERVAL };
+    })(typeof window !== "undefined" ? window : globalThis);
+  </script>
+  <script>// tradeanalysis.js — port de trade_analysis.py
+
+    (function (global) {
+      "use strict";
+
+      function signalSource(data, idx) {
+        const sources = [];
+        if (data.srcMomentumBuy[idx] || data.srcMomentumSell[idx]) sources.push("Momentum EMA");
+        if (data.srcDotsBuy[idx] || data.srcDotsSell[idx]) sources.push("Squeeze Dots");
+        if (data.srcBbBuy[idx] || data.srcBbSell[idx]) sources.push("Bollinger Bands");
+        return sources.length ? sources.join(" + ") : "Desconocida";
+      }
+
+      function diagnosis(trade, data, params, isWin) {
+        const reason = trade.exitReason;
+        const adxEntry = data.adx[trade.entryIdx];
+        const keyLevel = (params.adx && params.adx.key_level) || 23;
+        const adxOn = params.adx && params.adx.enabled;
+
+        const base = {
+          SL: "Se cerro por Stop Loss: el precio se movio en contra sin llegar a tocar el Take Profit.",
+          TP: "Se cerro por Take Profit: alcanzo el objetivo definido por el ratio R:R.",
+          "SEÑAL_INVERSA": "Se cerro por una señal contraria antes de tocar el Stop Loss o el Take Profit.",
+          FIN_DATOS: "Quedo abierta al terminar los datos del backtest y se cerro al ultimo precio disponible.",
+          LIQUIDACION: "CUENTA LIQUIDADA: el equity llego a 0 y la posicion se cerro de forma forzada.",
+        }[reason] || "Motivo de cierre no reconocido.";
+
+        const extras = [];
+        if (!isWin) {
+          if (adxOn && typeof adxEntry === "number" && !Number.isNaN(adxEntry) && adxEntry < keyLevel + 3) {
+            extras.push(`El ADX al entrar era de ${adxEntry.toFixed(1)} (nivel clave ${keyLevel}): tendencia poco solida.`);
+          }
+          if (reason === "SL") {
+            extras.push("Podria evaluarse un Stop Loss mas amplio (mayor multiplicador ATR) o sumar un filtro adicional.");
+          } else if (reason === "SEÑAL_INVERSA") {
+            extras.push("Podria evaluarse desactivar el cierre por señal inversa y dejar que solo el SL/TP administren la salida.");
+          } else if (reason === "LIQUIDACION") {
+            extras.push("Conviene reducir el Riesgo por operacion (%) y/o ampliar el Stop Loss.");
+          }
+        }
+        return base + (extras.length ? " " + extras.join(" ") : "");
+      }
+
+      function analyzeTrades(trades, data, params) {
+        return trades.map((t, n) => {
+          const isWin = t.pnl > 0;
+          const entryTime = data.candles[t.entryIdx].t;
+          const exitTime = data.candles[t.exitIdx].t;
+          const notional = t.notional || 0;
+          const pnlPct = notional ? (t.pnl / notional) * 100 : 0;
+          return {
+            n: n + 1, side: t.side, entryTime, exitTime,
+            entryPrice: t.entryPrice, exitPrice: t.exitPrice, sl: t.sl, tp: t.tp,
+            pnl: t.pnl, pnlPct, result: isWin ? "Ganadora" : "Perdedora",
+            exitReason: t.exitReason, source: signalSource(data, t.entryIdx),
+            barsHeld: t.exitIdx - t.entryIdx,
+            diagnosis: diagnosis(t, data, params, isWin),
+          };
+        });
+      }
+
+      function summarizeExitReasons(enriched) {
+        const s = {};
+        for (const t of enriched) s[t.exitReason] = (s[t.exitReason] || 0) + 1;
+        return s;
+      }
+
+      global.TradeAnalysis = { analyzeTrades, summarizeExitReasons };
+    })(typeof window !== "undefined" ? window : globalThis);
+  </script>
+  <script>// app.js — interfaz web del bot
+
+    (function () {
+      "use strict";
+
+      const state = {
+        candlesByTf: {},
+        currentTf: null,
+        data: null,
+        backtestResult: null,
+        sweepRows: null,
+        priceChart: null,
+        equityChart: null,
+      };
+
+      const $ = (id) => document.getElementById(id);
+
+      function fmtDate(ms) {
+        if (!ms) return "N/D";
+        const d = new Date(ms);
+        return d.toISOString().slice(0, 16).replace("T", " ");
+      }
+      function fmtNum(v, digits) {
+        if (v === null || v === undefined || Number.isNaN(v)) return "N/D";
+        if (!Number.isFinite(v)) return v > 0 ? "∞" : "-∞";
+        return v.toFixed(digits === undefined ? 2 : digits);
+      }
+      function fmtDuration(ms) {
+        if (!ms) return "N/D";
+        const totalSec = Math.floor(ms / 1000);
+        const days = Math.floor(totalSec / 86400);
+        const hours = Math.floor((totalSec % 86400) / 3600);
+        const mins = Math.floor((totalSec % 3600) / 60);
+        let out = "";
+        if (days) out += days + "d ";
+        if (days || hours) out += String(hours).padStart(2, "0") + "h ";
+        out += String(mins).padStart(2, "0") + "m";
+        return out;
+      }
+
+      function log(msg) {
+        const el = $("console-log");
+        const time = new Date().toLocaleTimeString();
+        el.textContent += `[${time}] ${msg}\n`;
+        el.scrollTop = el.scrollHeight;
+      }
+
+      function showError(msg) {
+        log("ERROR: " + msg);
+        // Also show a visible error banner in the metrics area
+        var box = $("metrics-box");
+        if (box) {
+          box.innerHTML = '<div style="background:#2d1215;border:1px solid var(--neg);border-radius:8px;padding:16px;margin-bottom:12px;">' +
+            '<div style="color:var(--neg);font-weight:600;margin-bottom:6px;">⚠ Error</div>' +
+            '<div style="color:var(--fg);font-size:13px;">' + msg + '</div></div>';
+        }
+      }
+
+      function readParams() {
+        return {
+          ema20: { enabled: $("ema20-enabled").checked, period: +$("ema20-period").value },
+          ema50: { enabled: $("ema50-enabled").checked, period: +$("ema50-period").value },
+          ema200: { enabled: $("ema200-enabled").checked, period: +$("ema200-period").value },
+          adx: { enabled: $("adx-enabled").checked, period: +$("adx-period").value, key_level: +$("adx-level").value },
+          momentum: { enabled: $("momentum-enabled").checked },
+          dots: { enabled: $("dots-enabled").checked, mode: $("dots-mode").value },
+          bb: { enabled: $("bb-enabled").checked, period: +$("bb-period").value, mult: +$("bb-mult").value },
+          bb_width: { enabled: $("bbwidth-enabled").checked, min_pct: +$("bbwidth-min").value, max_pct: +$("bbwidth-max").value },
+          session: { mode: $("session-mode").value },
+          atr_pct: { enabled: $("atrpct-enabled").checked, min_pct: +$("atrpct-min").value, period: 14 },
+          fractal_fast: { enabled: $("fractal-fast-enabled").checked, left: +$("fractal-fast-left").value, right: +$("fractal-fast-right").value },
+          fractal_slow: { enabled: $("fractal-slow-enabled").checked, left: +$("fractal-slow-left").value, right: +$("fractal-slow-right").value },
+          fractal_push: { enabled: $("fractal-push-enabled").checked },
+          sqz_length: 20, sqz_mult: 2.0, sqz_length_kc: 20, sqz_mult_kc: 1.5, sqz_use_tr: true,
+        };
+      }
+
+      function readBacktestOpts() {
+        return {
+          initialCapital: +$("capital-inicial").value,
+          riskPct: +$("riesgo-pct").value,
+          feePct: +$("fee-pct").value,
+          atrPeriod: +$("atr-period").value,
+          atrMult: +$("atr-mult").value,
+          rrRatio: +$("rr-ratio").value,
+          closeOnOppositeSignal: $("close-on-opposite").checked,
+        };
+      }
+
+      async function onDownload() {
+        const source = $("data-source").value;
+        let symbol = $("symbol").value.trim();
+        const timeframe = $("timeframe").value;
+        const nCandles = +$("n-candles").value;
+        const corsProxy = $("cors-proxy").value.trim();
+
+        if (source === "yahoo" && !symbol) symbol = "GC=F";
+
+        $("download-status").textContent = "Descargando...";
+        log(`Descargando ${nCandles} velas de ${symbol} (${timeframe}) desde ${source}...`);
+        try {
+          const candles = await DataSources.fetchCandles(source, symbol, timeframe, nCandles, { corsProxy });
+          if (!candles.length) throw new Error("No se recibieron velas (revisa simbolo/temporalidad).");
+          state.candlesByTf[timeframe] = candles;
+          state.currentTf = timeframe;
+          $("download-status").textContent = `${candles.length} velas cargadas (${fmtDate(candles[0].t)} → ${fmtDate(candles[candles.length - 1].t)})`;
+          log(`OK: ${candles.length} velas cargadas.`);
+          $("run-backtest-btn").disabled = false;
+          $("run-sweep-btn").disabled = false;
+        } catch (err) {
+          $("download-status").textContent = "Error: " + err.message;
+          log("ERROR: " + err.message);
+        }
+      }
+
+      function onRunBacktest() {
+        const tf = state.currentTf;
+        const candles = state.candlesByTf[tf];
+        if (!candles) { log("Primero descarga velas."); return; }
+
+        activateTab("tab-backtest");
+
+        try {
+          const params = readParams();
+          const opts = readBacktestOpts();
+
+          log("Calculando señales...");
+          const data = Strategy.computeSignals(candles, params);
+          log("Corriendo backtest...");
+          const result = Backtester.runBacktest(data, opts);
+
+          state.data = data;
+          state.backtestResult = result;
+          state.lastParams = params;
+
+          try { renderPriceChart(data, result); } catch (err) { log("ERROR gráfico de precio: " + err.message); console.error(err); }
+          try { renderEquityChart(result.equityCurve, candles); } catch (err) { log("ERROR gráfico de equity: " + err.message); console.error(err); }
+          try { renderMetrics(result.metrics); } catch (err) { log("ERROR renderizando métricas: " + err.message); console.error(err); }
+          try { renderTradesTable(data, result, params); } catch (err) { log("ERROR renderizando tabla de operaciones: " + err.message); console.error(err); }
+
+          log(`Backtest listo: ${result.trades.length} operaciones, retorno ${fmtNum(result.metrics.totalReturnPct)}%`);
+          $("export-trades-btn").disabled = result.trades.length === 0;
+        } catch (err) {
+          log("ERROR en el backtest (antes de graficar): " + err.message);
+          console.error(err);
+        }
+      }
+
+      function renderMetrics(m) {
+        const box = $("metrics-box");
+        if (!m) { box.innerHTML = "<p class='muted'>Sin datos.</p>"; return; }
+        const cards = [
+          ["Retorno total", fmtNum(m.totalReturnPct) + "%", m.totalReturnPct >= 0 ? "pos" : "neg"],
+          ["Capital final", fmtNum(m.finalCapital) + " USDT", ""],
+          ["Nº operaciones", m.numTrades, ""],
+          ["Winrate", fmtNum(m.winRatePct, 1) + "%", ""],
+          ["Max Drawdown", fmtNum(m.maxDrawdownPct) + "%", "neg"],
+          ["Profit Factor", fmtNum(m.profitFactor), ""],
+          ["Racha max. perdidas", m.maxConsecutiveLosses, ""],
+          ["Mejor trade", fmtNum(m.bestTradePct) + "%", "pos"],
+          ["Peor SL", m.worstSlPct === null ? "N/D" : fmtNum(m.worstSlPct) + "%", "neg"],
+          ["Duración operativa", fmtDuration(m.tradingDurationMs), ""],
+          ["Liquidada", m.liquidated ? `SI (${fmtDate(m.liquidationTime)})` : "No", m.liquidated ? "neg" : ""],
+        ];
+        box.innerHTML = cards.map(([label, val, cls]) =>
+          `<div class="metric-card"><div class="metric-label">${label}</div><div class="metric-value ${cls}">${val}</div></div>`
+        ).join("");
+      }
+
+      function sampleLabels(candles) {
+        return candles.map(c => fmtDate(c.t));
+      }
+
+      function ensureCanvasSize(canvasId) {
+        var el = $(canvasId);
+        if (!el) return;
+        // Force the canvas to have explicit dimensions so Chart.js doesn't choke
+        var parent = el.parentElement;
+        if (el.clientWidth === 0 || el.clientHeight === 0) {
+          if (parent) {
+            el.style.width = parent.clientWidth + "px";
+            el.style.height = parent.clientHeight + "px";
+          } else {
+            el.style.width = "100%";
+            el.style.height = "300px";
+          }
+          el.width = el.offsetWidth || parseInt(el.style.width) || 800;
+          el.height = el.offsetHeight || parseInt(el.style.height) || 300;
+        }
+      }
+
+      function renderPriceChart(data, result) {
+        var canvas = $("price-chart");
+        if (!canvas) { log("ERROR: no se encontro el canvas price-chart"); return; }
+        ensureCanvasSize("price-chart");
+        var ctx = canvas.getContext("2d");
+        var params = state.lastParams;
+        var candles = data.candles;
+
+        var candleData = candles.map(function (cd) { return { x: cd.t, o: cd.o, h: cd.h, l: cd.l, c: cd.c }; });
+
+        var toXY = function (arr) { return candles.map(function (cd, i) { return { x: cd.t, y: arr[i] }; }); };
+
+        var datasets = [
+          {
+            type: "candlestick",
+            label: "Precio",
+            data: candleData,
+            borderColors: { up: "#3fb950", down: "#f85149", unchanged: "#7d8590" },
+            backgroundColors: { up: "rgba(63,185,80,0.5)", down: "rgba(248,81,73,0.5)", unchanged: "rgba(125,133,144,0.5)" },
+            order: 2,
+          },
+        ];
+        if (params.ema20.enabled) datasets.push({ type: "line", label: "EMA20", data: toXY(data.ema20), borderColor: "#4da3ff", borderWidth: 1, pointRadius: 0, order: 1 });
+        if (params.ema50.enabled) datasets.push({ type: "line", label: "EMA50", data: toXY(data.ema50), borderColor: "#ff9f40", borderWidth: 1, pointRadius: 0, order: 1 });
+        if (params.ema200.enabled) datasets.push({ type: "line", label: "EMA200", data: toXY(data.ema200), borderColor: "#c084fc", borderWidth: 1, pointRadius: 0, order: 1 });
+        if (params.bb.enabled) {
+          datasets.push({ type: "line", label: "BB sup.", data: toXY(data.bbUpper), borderColor: "#2dd4d4", borderWidth: 1, borderDash: [4, 3], pointRadius: 0, order: 1 });
+          datasets.push({ type: "line", label: "BB inf.", data: toXY(data.bbLower), borderColor: "#2dd4d4", borderWidth: 1, borderDash: [4, 3], pointRadius: 0, order: 1 });
+        }
+
+        var buyPts = candles.map(function (cd, i) { return data.signal[i] === "BUY" ? { x: cd.t, y: data.lows[i] * 0.998 } : null; }).filter(Boolean);
+        var sellPts = candles.map(function (cd, i) { return data.signal[i] === "SELL" ? { x: cd.t, y: data.highs[i] * 1.002 } : null; }).filter(Boolean);
+        datasets.push({ type: "line", label: "BUY", data: buyPts, borderColor: "transparent", backgroundColor: "#3fb950", pointBackgroundColor: "#3fb950", pointRadius: 5, pointStyle: "triangle", showLine: false, order: 0 });
+        datasets.push({ type: "line", label: "SELL", data: sellPts, borderColor: "transparent", backgroundColor: "#f85149", pointBackgroundColor: "#f85149", pointRadius: 5, pointStyle: "rectRot", showLine: false, order: 0 });
+
+        if (typeof Chart === "undefined") {
+          showError("Chart.js no se cargo. Revisa tu conexion a internet o algun bloqueador de anuncios.");
+          return;
+        }
+        if (!Chart.registry.getController("candlestick")) {
+          showError("El controlador de velas (chartjs-chart-financial) no se registro. Revisa tu conexion o adblocker.");
+          return;
+        }
+        if (state.priceChart) state.priceChart.destroy();
+        state.priceChart = new Chart(ctx, {
+          type: "candlestick",
+          data: { datasets },
+          options: candleChartOptions("Precio (velas reales) + señales"),
+        });
+      }
+
+      function candleChartOptions(title) {
+        return {
+          responsive: true,
+          maintainAspectRatio: false,
+          animation: false,
+          interaction: { mode: "index", intersect: false },
+          plugins: {
+            title: { display: true, text: title, color: "#e6edf3" },
+            legend: { labels: { color: "#9da7b3", boxWidth: 12, font: { size: 10 } } },
+          },
+          scales: {
+            x: {
+              type: "time",
+              time: { tooltipFormat: "yyyy-MM-dd HH:mm" },
+              ticks: { color: "#7d8590", maxTicksLimit: 10, autoSkip: true },
+              grid: { color: "#21262d" },
+            },
+            y: { ticks: { color: "#7d8590" }, grid: { color: "#21262d" } },
+          },
+        };
+      }
+
+      function renderEquityChart(equityCurve, candles) {
+        var canvas = $("equity-chart");
+        if (!canvas) { log("ERROR: no se encontro el canvas equity-chart"); return; }
+        ensureCanvasSize("equity-chart");
+        var ctx = canvas.getContext("2d");
+        var labels = sampleLabels(candles);
+        if (state.equityChart) state.equityChart.destroy();
+        state.equityChart = new Chart(ctx, {
+          type: "line",
+          data: {
+            labels,
+            datasets: [{ label: "Equity", data: equityCurve, borderColor: "#3fb950", borderWidth: 1.3, pointRadius: 0, fill: true, backgroundColor: "rgba(63,185,80,0.08)" }],
+          },
+          options: chartOptions("Curva de equity"),
+        });
+      }
+
+      function chartOptions(title) {
+        return {
+          responsive: true,
+          maintainAspectRatio: false,
+          animation: false,
+          interaction: { mode: "index", intersect: false },
+          plugins: {
+            title: { display: true, text: title, color: "#e6edf3" },
+            legend: { labels: { color: "#9da7b3", boxWidth: 12, font: { size: 10 } } },
+          },
+          scales: {
+            x: { ticks: { color: "#7d8590", maxTicksLimit: 10, autoSkip: true }, grid: { color: "#21262d" } },
+            y: { ticks: { color: "#7d8590" }, grid: { color: "#21262d" } },
+          },
+        };
+      }
+
+      function renderTradesTable(data, result, params) {
+        const enriched = TradeAnalysis.analyzeTrades(result.trades, data, params);
+        state.enrichedTrades = enriched;
+        const tbody = $("trades-tbody");
+        if (!enriched.length) { tbody.innerHTML = "<tr><td colspan='10' class='muted'>Sin operaciones.</td></tr>"; return; }
+        tbody.innerHTML = enriched.map(t => `
+        <tr class="${t.pnl > 0 ? "row-win" : "row-loss"}">
+          <td>${t.n}</td><td>${t.side}</td>
+          <td>${fmtDate(t.entryTime)}</td><td>${fmtDate(t.exitTime)}</td>
+          <td>${fmtNum(t.entryPrice, 4)}</td><td>${fmtNum(t.exitPrice, 4)}</td>
+          <td>${fmtNum(t.pnl)}</td><td>${fmtNum(t.pnlPct)}%</td>
+          <td>${t.exitReason}</td><td>${t.source}</td>
+        </tr>`).join("");
+      }
+
+      function exportTradesCsv() {
+        const rows = state.enrichedTrades || [];
+        if (!rows.length) return;
+        const headers = ["n", "side", "entry_time", "exit_time", "entry_price", "exit_price", "sl", "tp", "pnl", "pnl_pct", "result", "exit_reason", "source", "bars_held", "diagnosis"];
+        const lines = [headers.join(",")];
+        for (const t of rows) {
+          const vals = [t.n, t.side, fmtDate(t.entryTime), fmtDate(t.exitTime), t.entryPrice, t.exitPrice, t.sl, t.tp, t.pnl, t.pnlPct, t.result, t.exitReason, t.source, t.barsHeld, JSON.stringify(t.diagnosis)];
+          lines.push(vals.join(","));
+        }
+        downloadText(lines.join("\n"), "trades.csv");
+      }
+
+      function downloadText(content, filename) {
+        const blob = new Blob([content], { type: "text/csv;charset=utf-8;" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url; a.download = filename;
+        document.body.appendChild(a); a.click(); document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      }
+
+      function readSweepRanges() {
+        return {
+          atrMults: Sweep.rangeList($("sweep-atr-from").value, $("sweep-atr-to").value, $("sweep-atr-step").value),
+          rrRatios: Sweep.rangeList($("sweep-rr-from").value, $("sweep-rr-to").value, $("sweep-rr-step").value),
+          adxLevels: Sweep.rangeList($("sweep-adx-from").value, $("sweep-adx-to").value, $("sweep-adx-step").value),
+        };
+      }
+
+      function updateSweepComboCount() {
+        const { atrMults, rrRatios, adxLevels } = readSweepRanges();
+        const tfCount = document.querySelectorAll(".sweep-tf:checked").length;
+        const perTf = atrMults.length * rrRatios.length * adxLevels.length;
+        $("sweep-combo-count").textContent =
+          `${atrMults.length} × ${rrRatios.length} × ${adxLevels.length} = ${perTf} combinaciones por temporalidad` +
+          (tfCount ? ` (${perTf * tfCount} en total con ${tfCount} temporalidad${tfCount > 1 ? "es" : ""})` : "");
+      }
+
+      async function onRunSweep() {
+        const { atrMults, rrRatios, adxLevels } = readSweepRanges();
+        const source = $("data-source").value;
+        const symbol = $("symbol").value.trim() || (source === "yahoo" ? "GC=F" : "");
+        const nCandles = +$("n-candles").value;
+        const corsProxy = $("cors-proxy").value.trim();
+
+        const selectedTfs = Array.from(document.querySelectorAll(".sweep-tf:checked")).map(el => el.value);
+        if (!selectedTfs.length) { log("Selecciona al menos una temporalidad para el barrido."); return; }
+        if (!atrMults.length || !rrRatios.length || !adxLevels.length) { log("Revisa los rangos de Mult.ATR / R:R / Niveles ADX."); return; }
+
+        $("run-sweep-btn").disabled = true;
+        const total = selectedTfs.length;
+        $("sweep-status").textContent = `Descargando velas (0/${total} temporalidades)...`;
+        log(`Barrido: descargando ${selectedTfs.join(", ")}...`);
+
+        for (let i = 0; i < selectedTfs.length; i++) {
+          const tf = selectedTfs[i];
+          if (!state.candlesByTf[tf]) {
+            try {
+              state.candlesByTf[tf] = await DataSources.fetchCandles(source, symbol, tf, nCandles, { corsProxy });
+            } catch (err) {
+              log(`ERROR descargando ${tf}: ${err.message}`);
+            }
+          }
+          $("sweep-status").textContent = `Descargando velas (${i + 1}/${total} temporalidades)...`;
+        }
+
+        const candlesByTf = {};
+        for (const tf of selectedTfs) if (state.candlesByTf[tf]) candlesByTf[tf] = state.candlesByTf[tf];
+
+        const baseParams = readParams();
+        const backtestBase = readBacktestOpts();
+
+        const progressBox = $("sweep-progress-box");
+        const progressFill = $("sweep-progress-fill");
+        progressBox.style.display = "block";
+        progressFill.style.width = "0%";
+        $("sweep-status").textContent = "Corriendo combinaciones...";
+        await new Promise(r => setTimeout(r, 30));
+
+        try {
+          const rows = await Sweep.runSweepParallel({
+            candlesByTf, baseParams, atrMults, rrRatios, adxLevels,
+            atrPeriod: backtestBase.atrPeriod, initialCapital: backtestBase.initialCapital,
+            riskPct: backtestBase.riskPct, feePct: backtestBase.feePct,
+            closeOnOppositeSignal: backtestBase.closeOnOppositeSignal,
+          }, (done, total2) => {
+            const pct = total2 ? Math.round((done / total2) * 100) : 0;
+            progressFill.style.width = pct + "%";
+            $("sweep-status").textContent = `Corriendo... (${done}/${total2}, ${pct}%)`;
+          });
+
+          state.sweepRows = rows;
+          sortSweepRows();
+          progressFill.style.width = "100%";
+          $("sweep-status").textContent = `Listo: ${rows.length} combinaciones evaluadas.`;
+          log(`Barrido completo: ${rows.length} filas.`);
+          $("export-sweep-btn").disabled = rows.length === 0;
+          $("sweep-charts-btn").disabled = rows.length === 0;
+          if ($("sweep-charts-box").style.display !== "none") renderSweepCharts(rows);
+        } catch (err) {
+          log("ERROR en el barrido: " + err.message);
+          console.error(err);
+          $("sweep-status").textContent = "Error en el barrido.";
+        } finally {
+          $("run-sweep-btn").disabled = false;
+          setTimeout(() => { progressBox.style.display = "none"; }, 1500);
+        }
+      }
+
+      function renderSweepTable(rows) {
+        const tbody = $("sweep-tbody");
+        if (!rows.length) { tbody.innerHTML = "<tr><td colspan='19' class='muted'>Sin resultados.</td></tr>"; return; }
+        tbody.innerHTML = rows.slice(0, 500).map(r => `
+        <tr>
+          <td>${r.timeframe}</td><td>${r.atrMult}</td><td>${r.rrRatio}</td><td>${r.adxLevel}</td>
+          <td class="${r.retornoPct >= 0 ? "pos" : "neg"}">${fmtNum(r.retornoPct)}%</td>
+          <td>${fmtNum(r.finalCapital)}</td>
+          <td>${Number.isFinite(r.profitFactor) ? fmtNum(r.profitFactor) : "∞"}</td>
+          <td class="${r.weeklyPct === null ? "" : (r.weeklyPct >= 0 ? "pos" : "neg")}">${r.weeklyPct === null ? "N/D" : fmtNum(r.weeklyPct) + "%"}</td>
+          <td>${fmtNum(r.winratePct, 1)}%</td>
+          <td>${r.nTrades}</td>
+          <td>${r.wins}</td><td>${r.losses}</td>
+          <td class="pos">${r.avgWinPct === null ? "N/D" : fmtNum(r.avgWinPct) + "%"}</td>
+          <td class="neg">${r.avgLossPct === null ? "N/D" : fmtNum(r.avgLossPct) + "%"}</td>
+          <td class="pos">${r.bestTradePct === null ? "N/D" : fmtNum(r.bestTradePct) + "%"}</td>
+          <td class="neg">${r.worstSlPct === null ? "N/D" : fmtNum(r.worstSlPct) + "%"}</td>
+          <td class="neg">${fmtNum(r.maxDdPct)}%</td>
+          <td>${r.maxConsecutiveLosses}</td>
+          <td>${fmtDuration(r.tradingDurationMs)}</td>
+        </tr>`).join("");
+      }
+
+      let sweepSortKey = "retornoPct";
+      let sweepSortDir = -1;
+
+      function sortSweepRows() {
+        const rows = state.sweepRows || [];
+        const key = sweepSortKey, dir = sweepSortDir;
+        rows.sort((a, b) => {
+          let va = a[key], vb = b[key];
+          if (typeof va === "string") return dir * va.localeCompare(vb);
+          va = (va === null || va === undefined || Number.isNaN(va)) ? -Infinity : va;
+          vb = (vb === null || vb === undefined || Number.isNaN(vb)) ? -Infinity : vb;
+          return dir * (va - vb);
+        });
+        updateSweepHeaderIndicators();
+        renderSweepTable(rows);
+      }
+
+      function updateSweepHeaderIndicators() {
+        document.querySelectorAll("#sweep-thead-row th").forEach(th => {
+          const base = th.textContent.replace(/ [▲▼]$/, "");
+          th.textContent = base + (th.dataset.key === sweepSortKey ? (sweepSortDir === 1 ? " ▲" : " ▼") : "");
+        });
+      }
+
+      function initSweepSorting() {
+        document.querySelectorAll("#sweep-thead-row th").forEach(th => {
+          th.addEventListener("click", () => {
+            const key = th.dataset.key;
+            if (!key) return;
+            if (sweepSortKey === key) sweepSortDir *= -1;
+            else { sweepSortKey = key; sweepSortDir = -1; }
+            if (state.sweepRows && state.sweepRows.length) sortSweepRows();
+            else updateSweepHeaderIndicators();
+          });
+        });
+      }
+
+      function exportSweepCsv() {
+        const rows = state.sweepRows || [];
+        if (!rows.length) return;
+        const headers = ["timeframe", "atr_mult", "rr_ratio", "adx_level", "retorno_%", "capital_final", "profit_factor", "pct_semanal_ganado", "winrate_%", "n_trades", "wins", "losses", "ganancia_prom_%", "perdida_prom_%", "mejor_trade_%", "peor_sl_%", "max_dd_%", "racha_perdidas", "duracion_ms"];
+        const lines = [headers.join(",")];
+        for (const r of rows) {
+          lines.push([
+            r.timeframe, r.atrMult, r.rrRatio, r.adxLevel, r.retornoPct, r.finalCapital,
+            r.profitFactor, r.weeklyPct, r.winratePct, r.nTrades, r.wins, r.losses,
+            r.avgWinPct, r.avgLossPct, r.bestTradePct, r.worstSlPct,
+            r.maxDdPct, r.maxConsecutiveLosses, r.tradingDurationMs,
+          ].join(","));
+        }
+        downloadText(lines.join("\n"), "sweep_results.csv");
+      }
+
+      function avgProfitFactorByParam(rows, key) {
+        const groups = new Map();
+        for (const r of rows) {
+          if (!Number.isFinite(r.profitFactor)) continue;
+          const k = r[key];
+          if (!groups.has(k)) groups.set(k, []);
+          groups.get(k).push(r.profitFactor);
+        }
+        const paramValues = [...groups.keys()].sort((a, b) => a - b);
+        const avgs = paramValues.map(v => {
+          const arr = groups.get(v);
+          return arr.reduce((a, b) => a + b, 0) / arr.length;
+        });
+        return { labels: paramValues.map(v => String(v)), data: avgs };
+      }
+
+      function barChartOptions(title, xLabel) {
+        return {
+          responsive: true,
+          maintainAspectRatio: false,
+          animation: false,
+          plugins: {
+            title: { display: true, text: title, color: "#e6edf3" },
+            legend: { display: false },
+          },
+          scales: {
+            x: { title: { display: true, text: xLabel, color: "#7d8590" }, ticks: { color: "#7d8590" }, grid: { color: "#21262d" } },
+            y: { title: { display: true, text: "Profit Factor (prom.)", color: "#7d8590" }, ticks: { color: "#7d8590" }, grid: { color: "#21262d" }, beginAtZero: true },
+          },
+        };
+      }
+
+      function renderSweepCharts(rows) {
+        var specs = [
+          { key: "adxLevel", canvasId: "pf-vs-adx-chart", stateKey: "pfAdxChart", title: "Profit Factor vs Nivel ADX", xLabel: "Nivel ADX" },
+          { key: "atrMult", canvasId: "pf-vs-atrmult-chart", stateKey: "pfAtrChart", title: "Profit Factor vs Mult. ATR", xLabel: "Mult. ATR" },
+          { key: "rrRatio", canvasId: "pf-vs-rr-chart", stateKey: "pfRrChart", title: "Profit Factor vs Ratio R:R", xLabel: "Ratio R:R" },
+        ];
+        for (var si = 0; si < specs.length; si++) {
+          var s = specs[si];
+          var canvas = $(s.canvasId);
+          if (!canvas) continue;
+          ensureCanvasSize(s.canvasId);
+          var result = avgProfitFactorByParam(rows, s.key);
+          if (state[s.stateKey]) state[s.stateKey].destroy();
+          var ctx = canvas.getContext("2d");
+          state[s.stateKey] = new Chart(ctx, {
+            type: "bar",
+            data: { labels: result.labels, datasets: [{ label: "Profit Factor", data: result.data, backgroundColor: "#4da3ff" }] },
+            options: barChartOptions(s.title, s.xLabel),
+          });
+        }
+      }
+
+      function toggleSweepCharts() {
+        const box = $("sweep-charts-box");
+        const showing = box.style.display !== "none";
+        if (showing) { box.style.display = "none"; return; }
+        box.style.display = "block";
+        const rows = state.sweepRows || [];
+        if (rows.length) renderSweepCharts(rows);
+        requestAnimationFrame(() => {
+          if (state.pfAdxChart) state.pfAdxChart.resize();
+          if (state.pfAtrChart) state.pfAtrChart.resize();
+          if (state.pfRrChart) state.pfRrChart.resize();
+        });
+      }
+
+      function activateTab(tabId) {
+        document.querySelectorAll(".tab-btn").forEach(b => b.classList.toggle("active", b.dataset.tab === tabId));
+        document.querySelectorAll(".tab-panel").forEach(p => p.classList.toggle("active", p.id === tabId));
+        requestAnimationFrame(() => {
+          if (state.priceChart) state.priceChart.resize();
+          if (state.equityChart) state.equityChart.resize();
+          if (state.pfAdxChart) state.pfAdxChart.resize();
+          if (state.pfAtrChart) state.pfAtrChart.resize();
+          if (state.pfRrChart) state.pfRrChart.resize();
+        });
+      }
+
+      function toggleYahooFields() {
+        const isYahoo = $("data-source").value === "yahoo";
+        $("cors-proxy-row").style.display = isYahoo ? "flex" : "none";
+        $("yahoo-note").style.display = isYahoo ? "block" : "none";
+        if (isYahoo && !$("symbol").value.trim()) $("symbol").value = "GC=F";
+      }
+
+      function init() {
+        window.addEventListener("error", (e) => {
+          log(`ERROR JS no capturado: ${e.message} (${e.filename ? e.filename.split("/").pop() : ""}:${e.lineno || "?"})`);
+        });
+        window.addEventListener("unhandledrejection", (e) => {
+          log(`ERROR (promesa) no capturado: ${e.reason && e.reason.message ? e.reason.message : e.reason}`);
+        });
+
+        var libChecks = [
+          ["Chart.js", typeof window.Chart !== "undefined"],
+          ["Luxon", typeof window.luxon !== "undefined"],
+          ["Controlador de velas (chartjs-chart-financial)", !!(window.Chart && window.Chart.registry && window.Chart.registry.controllers.get("candlestick"))],
+        ];
+        var failed = libChecks.filter(function (c) { return !c[1]; }).map(function (c) { return c[0]; });
+        if (failed.length) {
+          var warnMsg = "ATENCION: no cargaron estas librerias: " + failed.join(", ") + ". Revisa tu conexion a internet o un bloqueador de anuncios/scripts.";
+          log(warnMsg);
+          // Show a visible persistent warning banner
+          var metricsBox = $("metrics-box");
+          if (metricsBox) {
+            metricsBox.innerHTML = '<div style="background:#2d1215;border:1px solid var(--neg);border-radius:8px;padding:16px;margin-bottom:12px;">' +
+              '<div style="color:var(--neg);font-weight:600;margin-bottom:6px;">⚠ Librerias faltantes</div>' +
+              '<div style="color:var(--fg);font-size:13px;">' + warnMsg + '</div></div>';
+          }
+        } else {
+          log("Librerias de graficos (Chart.js, Luxon, velas) cargadas correctamente.");
+        }
+
+        $("download-btn").addEventListener("click", onDownload);
+        $("run-backtest-btn").addEventListener("click", onRunBacktest);
+        $("run-sweep-btn").addEventListener("click", onRunSweep);
+        $("export-trades-btn").addEventListener("click", exportTradesCsv);
+        $("export-sweep-btn").addEventListener("click", exportSweepCsv);
+        $("sweep-charts-btn").addEventListener("click", toggleSweepCharts);
+        $("data-source").addEventListener("change", toggleYahooFields);
+        toggleYahooFields();
+        initSweepSorting();
+
+        ["sweep-atr-from", "sweep-atr-to", "sweep-atr-step",
+          "sweep-rr-from", "sweep-rr-to", "sweep-rr-step",
+          "sweep-adx-from", "sweep-adx-to", "sweep-adx-step"].forEach(id => {
+            $(id).addEventListener("input", updateSweepComboCount);
+          });
+        document.querySelectorAll(".sweep-tf").forEach(cb => cb.addEventListener("change", updateSweepComboCount));
+        updateSweepComboCount();
+
+        document.querySelectorAll(".tab-btn").forEach(btn => {
+          btn.addEventListener("click", () => activateTab(btn.dataset.tab));
+        });
+
+        log("Interfaz lista. Descarga velas para empezar.");
+      }
+
+      document.addEventListener("DOMContentLoaded", init);
+    })();
+  </script>
+</body>
+
+</html>
